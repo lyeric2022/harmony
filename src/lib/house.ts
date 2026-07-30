@@ -18,15 +18,38 @@ export const PEOPLE: Person[] = [
 ]
 
 export const DEFAULT_ROOMS: Room[] = [
-  { id: 'r1', number: 1, name: 'Bedroom 1', notes: '' },
-  { id: 'r2', number: 2, name: 'Bedroom 2', notes: '' },
-  { id: 'r3', number: 3, name: 'Bedroom 3', notes: '' },
-  { id: 'r4', number: 4, name: 'Bedroom 4', notes: '' },
+  {
+    id: 'r1',
+    number: 1,
+    name: 'Bedroom 1',
+    notes: 'Main level — only bedroom downstairs, by laundry & kitchen',
+  },
+  {
+    id: 'r2',
+    number: 2,
+    name: 'Bedroom 2',
+    notes: 'Upper level — largest room (L-shaped)',
+  },
+  {
+    id: 'r3',
+    number: 3,
+    name: 'Bedroom 3',
+    notes: 'Upper level — middle room, near bath',
+  },
+  {
+    id: 'r4',
+    number: 4,
+    name: 'Bedroom 4',
+    notes: 'Upper level — overlooking living void',
+  },
 ]
 
 export const DEFAULT_RENT = 4000
 
-export const STORAGE_KEY = 'harmony-house-v1'
+/** Numbered floor plan baked into the site. */
+export const DEFAULT_FLOOR_PLAN = `${import.meta.env.BASE_URL}rooms/floorplan-numbered.png`
+
+export const STORAGE_KEY = 'harmony-house-v2'
 
 export type StoredHouse = {
   rent: number

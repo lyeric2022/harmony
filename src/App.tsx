@@ -7,6 +7,7 @@ import {
   type DivisionResult,
 } from './lib/rentDivision'
 import {
+  DEFAULT_FLOOR_PLAN,
   DEFAULT_RENT,
   DEFAULT_ROOMS,
   PEOPLE,
@@ -48,7 +49,7 @@ export default function App() {
   const [step, setStep] = useState<Step>('home')
   const [rent, setRent] = useState(DEFAULT_RENT)
   const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS)
-  const [floorPlan, setFloorPlan] = useState<string | null>(null)
+  const [floorPlan, setFloorPlan] = useState<string | null>(DEFAULT_FLOOR_PLAN)
   const [roomImages, setRoomImages] = useState<Record<string, string | null>>({})
   const [activePerson, setActivePerson] = useState(0)
   const [percents, setPercents] = useState<number[][]>(
@@ -63,7 +64,9 @@ export default function App() {
     if (stored) {
       if (stored.rent) setRent(stored.rent)
       if (stored.rooms?.length === 4) setRooms(stored.rooms)
+      // Prefer uploaded override; otherwise keep baked numbered plan
       if (stored.floorPlanDataUrl) setFloorPlan(stored.floorPlanDataUrl)
+      else setFloorPlan(DEFAULT_FLOOR_PLAN)
       if (stored.roomImages) setRoomImages(stored.roomImages)
       if (stored.percents?.length === 4) setPercents(stored.percents)
     }
@@ -206,7 +209,7 @@ export default function App() {
                   ))}
                 </ul>
                 <p className="panel-foot">
-                  {filledPhotos}/4 room photos · {floorPlan ? 'Floor plan ready' : 'Add floor plan'}
+                  Numbered floor plan loaded · {filledPhotos}/4 optional room photos
                 </p>
               </aside>
             </div>
