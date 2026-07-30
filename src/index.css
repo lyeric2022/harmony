@@ -1,0 +1,56 @@
+:root {
+  --ink: #0b1f1c;
+  --ink-soft: #1a332e;
+  --mist: #e7f1ee;
+  --mist-2: #d3e6e0;
+  --paper: #f4faf7;
+  --teal: #1f8f78;
+  --teal-bright: #2bb59a;
+  --amber: #e2a24a;
+  --coral: #d96b4c;
+  --line: rgba(11, 31, 28, 0.12);
+  --shadow: 0 24px 60px rgba(11, 31, 28, 0.12);
+  --font-display: 'Syne', system-ui, sans-serif;
+  --font-serif: 'Fraunces', Georgia, serif;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--font-display);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 700px at 10% -10%, rgba(43, 181, 154, 0.22), transparent 55%),
+    radial-gradient(900px 600px at 100% 0%, rgba(226, 162, 74, 0.18), transparent 50%),
+    radial-gradient(800px 500px at 50% 100%, rgba(217, 107, 76, 0.1), transparent 55%),
+    linear-gradient(180deg, #f7fcfa 0%, var(--paper) 40%, #eef6f3 100%);
+  background-attachment: fixed;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}
