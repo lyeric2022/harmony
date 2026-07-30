@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import './App.css'
 import {
   averagePercents,
@@ -26,12 +25,12 @@ function BrandMark() {
     <span className="brand-mark" aria-hidden>
       <svg viewBox="0 0 24 24" fill="none">
         <path
-          d="M4 16V9.5L12 4l8 5.5V16"
-          stroke="#E8F2EF"
-          strokeWidth="2"
+          d="M5 17V10.5L12 5.5l7 5V17"
+          stroke="#191918"
+          strokeWidth="1.8"
           strokeLinejoin="round"
         />
-        <circle cx="12" cy="13" r="2.4" fill="#2BB59A" />
+        <rect x="10" y="12" width="4" height="4" rx="1" fill="#A71D31" />
       </svg>
     </span>
   )
@@ -43,6 +42,12 @@ function equalPercents(n: number) {
   const drift = 100 - base * n
   row[n - 1] = Math.round((base + drift) * 10) / 10
   return row
+}
+
+function renormalize(row: number[]): number[] {
+  const sum = row.reduce((a, b) => a + b, 0)
+  if (sum <= 0) return equalPercents(row.length)
+  return row.map((x) => Math.round((x / sum) * 1000) / 10)
 }
 
 export default function App() {
@@ -59,54 +64,48 @@ export default function App() {
   const [result, setResult] = useState<DivisionResult | null>(null)
 
   const n = Math.min(rooms.length, people.length)
-  const readySetup = rooms.length >= 2 && people.length >= 2 && rooms.length === people.length && rent > 0
+  const readySetup =
+    rooms.length >= 2 &&
+    people.length >= 2 &&
+    rooms.length === people.length &&
+    rent > 0
 
   const currentSum = useMemo(
     () => (percents[activePerson] ?? []).reduce((a, b) => a + b, 0),
     [percents, activePerson],
   )
 
-  function syncMatrix(nextRooms: string[], nextPeople: string[]) {
-    const size = Math.min(nextRooms.length, nextPeople.length)
-    setPercents(
-      Array.from({ length: nextPeople.length }, (_, i) => {
-        const prev = percents[i]
-        if (prev && prev.length === size) return prev
-        return equalPercents(Math.max(size, 1))
-      }),
-    )
-    setActivePerson(0)
-  }
+  const avg = averagePercents(
+    percents.slice(0, n).map((row) => renormalize(row.slice(0, n))),
+  )
+
+  const stepMeta = [
+    { id: 'setup' as const, label: 'Setup' },
+    { id: 'value' as const, label: 'Value' },
+    { id: 'results' as const, label: 'Discover' },
+  ]
+  const stepIndex = stepMeta.findIndex((s) => s.id === step)
 
   function addRoom() {
     const name = roomDraft.trim() || `Room ${rooms.length + 1}`
-    const next = [...rooms, name]
-    setRooms(next)
+    setRooms([...rooms, name])
     setRoomDraft('')
-    if (people.length === rooms.length) {
-      // keep counts matched only when user also adds people; pad percents later
-    }
-    setPercents((prev) =>
-      prev.map((row) => {
-        const nextRow = [...row, 0]
-        return renormalize(nextRow)
-      }).concat(people.length > prev.length ? [] : []),
-    )
+    setPercents((prev) => prev.map((row) => renormalize([...row, 0])))
   }
 
   function addPerson() {
     const name = personDraft.trim() || `Person ${people.length + 1}`
-    const next = [...people, name]
-    setPeople(next)
+    setPeople([...people, name])
     setPersonDraft('')
     setPercents((prev) => [...prev, equalPercents(rooms.length)])
   }
 
   function removeRoom(idx: number) {
     if (rooms.length <= 2) return
-    const next = rooms.filter((_, i) => i !== idx)
-    setRooms(next)
-    setPercents((prev) => prev.map((row) => renormalize(row.filter((_, i) => i !== idx))))
+    setRooms(rooms.filter((_, i) => i !== idx))
+    setPercents((prev) =>
+      prev.map((row) => renormalize(row.filter((_, i) => i !== idx))),
+    )
   }
 
   function removePerson(idx: number) {
@@ -134,271 +133,264 @@ export default function App() {
     const size = Math.min(rooms.length, people.length)
     const trimmedPeople = people.slice(0, size)
     const trimmedRooms = rooms.slice(0, size)
-    const matrix = percents.slice(0, size).map((row) => renormalize(row.slice(0, size)))
+    const matrix = percents
+      .slice(0, size)
+      .map((row) => renormalize(row.slice(0, size)))
     setPeople(trimmedPeople)
     setRooms(trimmedRooms)
     setPercents(matrix)
-    const values = percentsToValues(matrix, rent)
-    const division = divideRent(values, rent)
-    setResult(division)
+    setResult(divideRent(percentsToValues(matrix, rent), rent))
     setStep('results')
   }
 
-  const avg = averagePercents(
-    percents.slice(0, n).map((row) => renormalize(row.slice(0, n))),
-  )
-
-  const steps: { id: Step; label: string }[] = [
-    { id: 'home', label: 'Home' },
-    { id: 'setup', label: 'Setup' },
-    { id: 'value', label: 'Value' },
-    { id: 'results', label: 'Discover' },
-  ]
-
-  const stepIndex = steps.findIndex((s) => s.id === step)
+  function loadDemo() {
+    setRooms(DEFAULT_ROOMS)
+    setPeople(DEFAULT_PEOPLE)
+    setRent(3600)
+    setPercents(DEFAULT_PEOPLE.map(() => equalPercents(3)))
+    setActivePerson(0)
+    setStep('setup')
+  }
 
   return (
-    <div className="app">
-      <header className="topnav">
-        <a className="brand" href="#" onClick={(e) => { e.preventDefault(); setStep('home') }}>
-          <BrandMark />
-          <span className="brand-name">Harmony</span>
-        </a>
-        {step !== 'home' && (
-          <div className="step-pills" aria-label="Progress">
-            {steps.slice(1).map((s, i) => {
-              const idx = i + 1
-              const cls =
-                s.id === step ? 'active' : idx < stepIndex ? 'done' : ''
-              return (
-                <span key={s.id} className={`step-pill ${cls}`}>
-                  {s.label}
-                </span>
-              )
-            })}
-          </div>
-        )}
-      </header>
-
-      <AnimatePresence mode="wait">
-        {step === 'home' && (
-          <motion.section
-            key="home"
-            className="hero"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+    <div className="shell">
+      <div className="container">
+        <header className="nav">
+          <a
+            className="brand"
+            href="#home"
+            onClick={(e) => {
+              e.preventDefault()
+              setStep('home')
+            }}
           >
-            <motion.div
-              className="hero-bg"
-              initial={{ scale: 1.04, opacity: 0.85 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-            />
-            <div className="hero-content">
-              <motion.p
-                className="hero-brand"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1, duration: 0.55 }}
-              >
-                Harmony
-              </motion.p>
-              <motion.h1
-                initial={{ opacity: 0, y: 18 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2, duration: 0.55 }}
-              >
-                Price rooms by perceived value — then discover a fair split.
-              </motion.h1>
-              <motion.p
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3, duration: 0.5 }}
-              >
-                Everyone rates each bedroom. An envy-free algorithm turns those
-                preferences into real rent prices — beyond square footage and
-                gut math.
-              </motion.p>
-              <motion.div
-                className="cta-row"
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4, duration: 0.45 }}
-              >
-                <button className="btn btn-primary" onClick={() => setStep('setup')}>
-                  Start price discovery
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    syncMatrix(DEFAULT_ROOMS, DEFAULT_PEOPLE)
-                    setRooms(DEFAULT_ROOMS)
-                    setPeople(DEFAULT_PEOPLE)
-                    setRent(3600)
-                    setPercents(DEFAULT_PEOPLE.map(() => equalPercents(3)))
-                    setStep('setup')
-                  }}
+            <BrandMark />
+            <span className="brand-name">Harmony</span>
+          </a>
+
+          {step !== 'home' && (
+            <nav className="steps" aria-label="Progress">
+              {stepMeta.map((s, i) => (
+                <span
+                  key={s.id}
+                  className={`step ${s.id === step ? 'active' : i < stepIndex ? 'done' : ''}`}
                 >
-                  Try a demo house
-                </button>
-              </motion.div>
+                  {String(i + 1).padStart(2, '0')} {s.label}
+                </span>
+              ))}
+            </nav>
+          )}
+        </header>
+
+        {step === 'home' && (
+          <section className="section">
+            <div className="hero-grid">
+              <div>
+                <span className="eyebrow">Fair rent division</span>
+                <h1 className="section-title display">Harmony</h1>
+                <p className="section-copy">
+                  Price each bedroom by perceived value, then let an envy-free
+                  algorithm discover who pays what — beyond square footage and
+                  gut adjustments.
+                </p>
+                <div className="cta-row">
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={() => setStep('setup')}
+                  >
+                    Start price discovery
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={loadDemo}
+                  >
+                    Try a demo house
+                  </button>
+                </div>
+              </div>
+
+              <aside className="hero-panel" aria-label="How it works">
+                <h2>How it works</h2>
+                <ol className="hero-list">
+                  <li>
+                    <span className="num">1</span>
+                    <div>
+                      <strong>Set the house</strong>
+                      <span>Rent, bedrooms, and roommates in equal count.</span>
+                    </div>
+                  </li>
+                  <li>
+                    <span className="num">2</span>
+                    <div>
+                      <strong>Score perceived value</strong>
+                      <span>Each person allocates 100% across rooms.</span>
+                    </div>
+                  </li>
+                  <li>
+                    <span className="num">3</span>
+                    <div>
+                      <strong>Discover prices</strong>
+                      <span>Assignment and rent so nobody wants to swap.</span>
+                    </div>
+                  </li>
+                </ol>
+              </aside>
             </div>
-          </motion.section>
+          </section>
         )}
 
         {step === 'setup' && (
-          <motion.section
-            key="setup"
-            className="panel"
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.4 }}
-          >
-            <div className="panel-head">
-              <h2>Set the house.</h2>
-              <p>
-                Same number of people and bedrooms. Total rent stays fixed —
-                Harmony redistributes who pays what.
-              </p>
-            </div>
+          <section className="section">
+            <span className="eyebrow">01 / Setup</span>
+            <h1 className="section-title">Set the house</h1>
+            <p className="section-copy">
+              Keep people and bedrooms equal. Total rent stays fixed — Harmony
+              redistributes who pays what.
+            </p>
 
-            <div className="field-grid two">
-              <label className="field">
-                <span>Monthly rent</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={rent}
-                  onChange={(e) => setRent(Number(e.target.value) || 0)}
-                />
-              </label>
-            </div>
-
-            <div className="field-grid two" style={{ marginTop: '1.5rem' }}>
-              <div>
+            <div className="form-stack">
+              <div className="form-grid">
                 <label className="field">
-                  <span>Bedrooms</span>
-                </label>
-                <div className="chip-row">
-                  {rooms.map((room, i) => (
-                    <span className="chip" key={`${room}-${i}`}>
-                      {i + 1}. {room}
-                      <button type="button" aria-label={`Remove ${room}`} onClick={() => removeRoom(i)}>
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <div className="inline-add">
+                  <span className="field-label">Monthly rent</span>
                   <input
-                    type="text"
-                    placeholder="e.g. Corner suite"
-                    value={roomDraft}
-                    onChange={(e) => setRoomDraft(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addRoom()}
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={rent}
+                    onChange={(e) => setRent(Number(e.target.value) || 0)}
                   />
-                  <button className="btn btn-soft" type="button" onClick={addRoom}>
-                    Add
-                  </button>
+                </label>
+              </div>
+
+              <div className="form-grid">
+                <div className="panel">
+                  <label className="field">
+                    <span className="field-label">Bedrooms</span>
+                  </label>
+                  <div className="chip-row">
+                    {rooms.map((room, i) => (
+                      <span className="chip" key={`${room}-${i}`}>
+                        {i + 1}. {room}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${room}`}
+                          onClick={() => removeRoom(i)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="inline-add">
+                    <input
+                      className="input"
+                      type="text"
+                      placeholder="e.g. Corner suite"
+                      value={roomDraft}
+                      onChange={(e) => setRoomDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addRoom()}
+                    />
+                    <button className="btn btn-ghost" type="button" onClick={addRoom}>
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                <div className="panel">
+                  <label className="field">
+                    <span className="field-label">Roommates</span>
+                  </label>
+                  <div className="chip-row">
+                    {people.map((person, i) => (
+                      <span className="chip" key={`${person}-${i}`}>
+                        {person}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${person}`}
+                          onClick={() => removePerson(i)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="inline-add">
+                    <input
+                      className="input"
+                      type="text"
+                      placeholder="Name"
+                      value={personDraft}
+                      onChange={(e) => setPersonDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addPerson()}
+                    />
+                    <button className="btn btn-ghost" type="button" onClick={addPerson}>
+                      Add
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="field">
-                  <span>Roommates</span>
-                </label>
-                <div className="chip-row">
-                  {people.map((person, i) => (
-                    <span className="chip" key={`${person}-${i}`}>
-                      {person}
-                      <button
-                        type="button"
-                        aria-label={`Remove ${person}`}
-                        onClick={() => removePerson(i)}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <div className="inline-add">
-                  <input
-                    type="text"
-                    placeholder="Name"
-                    value={personDraft}
-                    onChange={(e) => setPersonDraft(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addPerson()}
-                  />
-                  <button className="btn btn-soft" type="button" onClick={addPerson}>
-                    Add
-                  </button>
-                </div>
+              {!readySetup && (
+                <p className="note warn">
+                  Need at least 2 rooms and 2 people, with equal counts
+                  {rooms.length !== people.length
+                    ? ` (now ${rooms.length} rooms / ${people.length} people)`
+                    : ''}
+                  .
+                </p>
+              )}
+
+              <div className="actions">
+                <button
+                  className="btn btn-ghost"
+                  type="button"
+                  onClick={() => setStep('home')}
+                >
+                  Back
+                </button>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  disabled={!readySetup}
+                  onClick={() => {
+                    const size = Math.min(rooms.length, people.length)
+                    setRooms(rooms.slice(0, size))
+                    setPeople(people.slice(0, size))
+                    setPercents((prev) =>
+                      prev
+                        .slice(0, size)
+                        .map((row) => renormalize(row.slice(0, size))),
+                    )
+                    setActivePerson(0)
+                    setStep('value')
+                  }}
+                >
+                  Rate the rooms
+                </button>
               </div>
             </div>
-
-            {!readySetup && (
-              <p className="auto-note">
-                Need at least 2 rooms and 2 people, with equal counts
-                {rooms.length !== people.length
-                  ? ` (now ${rooms.length} rooms / ${people.length} people)`
-                  : ''}
-                .
-              </p>
-            )}
-
-            <div className="actions">
-              <button className="btn btn-soft" onClick={() => setStep('home')}>
-                Back
-              </button>
-              <button
-                className="btn btn-ink"
-                disabled={!readySetup}
-                onClick={() => {
-                  const size = Math.min(rooms.length, people.length)
-                  setRooms(rooms.slice(0, size))
-                  setPeople(people.slice(0, size))
-                  setPercents((prev) =>
-                    prev
-                      .slice(0, size)
-                      .map((row) => renormalize(row.slice(0, size))),
-                  )
-                  setActivePerson(0)
-                  setStep('value')
-                }}
-              >
-                Rate the rooms
-              </button>
-            </div>
-          </motion.section>
+          </section>
         )}
 
         {step === 'value' && (
-          <motion.section
-            key="value"
-            className="panel"
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.4 }}
-          >
-            <div className="panel-head">
-              <h2>Perceived value.</h2>
-              <p>
-                Each roommate allocates 100% across bedrooms — what share of
-                rent feels fair for each room, to them. Pass the phone around;
-                keep answers honest.
-              </p>
-            </div>
+          <section className="section">
+            <span className="eyebrow">02 / Value</span>
+            <h1 className="section-title">Perceived value</h1>
+            <p className="section-copy">
+              Each roommate allocates 100% across bedrooms — the share of rent
+              that feels fair for each room. Pass the phone; answer honestly.
+            </p>
 
-            <div className="person-tabs">
+            <div className="tabs" role="tablist" aria-label="Roommate">
               {people.map((person, i) => (
                 <button
                   key={person}
                   type="button"
-                  className={`person-tab ${i === activePerson ? 'active' : ''}`}
+                  role="tab"
+                  aria-selected={i === activePerson}
+                  className={`tab ${i === activePerson ? 'active' : ''}`}
                   onClick={() => setActivePerson(i)}
                 >
                   {person}
@@ -406,48 +398,65 @@ export default function App() {
               ))}
             </div>
 
-            <div className="valuations">
-              {rooms.map((room, roomIdx) => (
-                <div className="room-slider" key={room}>
-                  <div className="room-slider-top">
-                    <strong>
-                      {roomIdx + 1}. {room}
-                    </strong>
-                    <em>{(percents[activePerson]?.[roomIdx] ?? 0).toFixed(1)}%</em>
+            <div className="panel">
+              <div className="valuations">
+                {rooms.map((room, roomIdx) => (
+                  <div className="room-row" key={room}>
+                    <div className="room-row-top">
+                      <strong>
+                        {roomIdx + 1}. {room}
+                      </strong>
+                      <span>
+                        {(percents[activePerson]?.[roomIdx] ?? 0).toFixed(1)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      aria-label={`Value for ${room}`}
+                      value={percents[activePerson]?.[roomIdx] ?? 0}
+                      onChange={(e) =>
+                        setPercent(activePerson, roomIdx, Number(e.target.value))
+                      }
+                    />
                   </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={0.5}
-                    value={percents[activePerson]?.[roomIdx] ?? 0}
-                    onChange={(e) =>
-                      setPercent(activePerson, roomIdx, Number(e.target.value))
-                    }
-                  />
-                </div>
-              ))}
+                ))}
+              </div>
+
+              <div
+                className={`sum-bar ${Math.abs(currentSum - 100) > 0.2 ? 'warn' : ''}`}
+              >
+                <span>{people[activePerson]}&apos;s total</span>
+                <span>{currentSum.toFixed(1)}% / 100%</span>
+              </div>
             </div>
 
-            <div className={`sum-bar ${Math.abs(currentSum - 100) > 0.2 ? 'warn' : ''}`}>
-              <span>{people[activePerson]}&apos;s total</span>
-              <span>{currentSum.toFixed(1)}% / 100%</span>
-            </div>
-            <p className="auto-note">
-              Totals are auto-normalized when you run discovery. Tip: equal rooms
-              ≈ {(100 / rooms.length).toFixed(1)}% each.
+            <p className="note" style={{ marginTop: 16 }}>
+              Totals auto-normalize on discovery. Equal rooms ≈{' '}
+              {(100 / rooms.length).toFixed(1)}% each.
             </p>
 
-            <div className="actions">
-              <button className="btn btn-soft" onClick={() => setStep('setup')}>
+            <div className="actions" style={{ marginTop: 24 }}>
+              <button
+                className="btn btn-ghost"
+                type="button"
+                onClick={() => setStep('setup')}
+              >
                 Back
               </button>
-              <button className="btn btn-soft" onClick={normalizeActive}>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={normalizeActive}
+              >
                 Normalize to 100%
               </button>
               {activePerson < people.length - 1 ? (
                 <button
-                  className="btn btn-ink"
+                  className="btn btn-primary"
+                  type="button"
                   onClick={() => {
                     normalizeActive()
                     setActivePerson((p) => p + 1)
@@ -456,52 +465,42 @@ export default function App() {
                   Next: {people[activePerson + 1]}
                 </button>
               ) : (
-                <button className="btn btn-primary" onClick={runDiscovery}>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={runDiscovery}
+                >
                   Run price discovery
                 </button>
               )}
             </div>
-          </motion.section>
+          </section>
         )}
 
         {step === 'results' && result && (
-          <motion.section
-            key="results"
-            className="panel"
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.4 }}
-          >
-            <div className="results-hero">
-              <span className={`badge ${result.envyFree ? '' : 'bad'}`}>
-                {result.envyFree ? 'Envy-free split' : 'Approximate split'}
-              </span>
-              <div className="panel-head" style={{ marginBottom: 0 }}>
-                <h2>Your fair prices.</h2>
-                <p>
-                  Total {money(rent)} · assignment maximizes collective value,
-                  then prices are tuned so nobody wants to swap.
-                </p>
-              </div>
-            </div>
+          <section className="section">
+            <span className="eyebrow">03 / Discover</span>
+            <span className={`badge ${result.envyFree ? 'ok' : ''}`}>
+              {result.envyFree ? 'Envy-free split' : 'Approximate split'}
+            </span>
+            <h1 className="section-title">Your fair prices</h1>
+            <p className="section-copy">
+              Total {money(rent)}. Rooms assigned to maximize collective value,
+              then priced so nobody prefers another bundle.
+            </p>
 
-            <div className="result-list">
+            <div className="result-grid">
               {result.assignment.map((roomIdx, personIdx) => (
-                <motion.div
-                  className="result-row"
-                  key={people[personIdx]}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.08 * personIdx, duration: 0.4 }}
-                >
-                  <div className="result-index">{roomIdx + 1}</div>
+                <div className="result-card" key={people[personIdx]}>
+                  <div className="result-num">{roomIdx + 1}</div>
                   <div className="result-meta">
                     <strong>{people[personIdx]}</strong>
                     <span>{rooms[roomIdx]}</span>
                   </div>
-                  <div className="result-price">{money(result.prices[roomIdx])}</div>
-                </motion.div>
+                  <div className="result-price">
+                    {money(result.prices[roomIdx])}
+                  </div>
+                </div>
               ))}
             </div>
 
@@ -509,38 +508,36 @@ export default function App() {
               <h3>Group signal</h3>
               <p>
                 Averaged perceived value:{' '}
-                {rooms
-                  .map((r, i) => `${r} ${avg[i]?.toFixed(1)}%`)
-                  .join(' · ')}
-                . Harmony used individual valuations (not just the average) so
-                preferences still shape who gets which room.
+                {rooms.map((r, i) => `${r} ${avg[i]?.toFixed(1)}%`).join(' · ')}.
+                Harmony used individual valuations — not just the average — so
+                preferences still shape assignment.
               </p>
             </div>
 
             <div className="actions">
-              <button className="btn btn-soft" onClick={() => setStep('value')}>
+              <button
+                className="btn btn-ghost"
+                type="button"
+                onClick={() => setStep('value')}
+              >
                 Adjust values
               </button>
-              <button className="btn btn-ink" onClick={() => setStep('home')}>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setStep('home')}
+              >
                 Start over
               </button>
             </div>
 
-            <p className="footnote">
+            <p className="footer-note">
               Based on envy-free rent division (rental harmony / Spliddit-style
-              maximin). Assumes each person wants to maximize value minus rent.
-              Built for housemates who want price discovery — not landlord
-              appraisal.
+              maximin). Assumes each person maximizes value minus rent.
             </p>
-          </motion.section>
+          </section>
         )}
-      </AnimatePresence>
+      </div>
     </div>
   )
-}
-
-function renormalize(row: number[]): number[] {
-  const sum = row.reduce((a, b) => a + b, 0)
-  if (sum <= 0) return equalPercents(row.length)
-  return row.map((x) => Math.round((x / sum) * 1000) / 10)
 }

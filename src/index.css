@@ -1,20 +1,33 @@
 :root {
-  --ink: #0b1f1c;
-  --ink-soft: #1a332e;
-  --mist: #e7f1ee;
-  --mist-2: #d3e6e0;
-  --paper: #f4faf7;
-  --teal: #1f8f78;
-  --teal-bright: #2bb59a;
-  --amber: #e2a24a;
-  --coral: #d96b4c;
-  --line: rgba(11, 31, 28, 0.12);
-  --shadow: 0 24px 60px rgba(11, 31, 28, 0.12);
-  --font-display: 'Syne', system-ui, sans-serif;
-  --font-serif: 'Fraunces', Georgia, serif;
-  color: var(--ink);
+  --paper: #fafaf5;
+  --panel: #f4f4eb;
+  --panel-featured: #ecebe0;
+  --ink: #191918;
+  --body: #474744;
+  --muted: #75756f;
+  --crimson: #a71d31;
+  --crimson-hover: #8f1829;
+  --border: #e3e2d8;
+  --radius: 2px;
+  --container: 1280px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 112px;
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --shadow-float: 0 8px 24px rgba(25, 25, 24, 0.1);
+
+  color: var(--body);
   background: var(--paper);
-  font-family: var(--font-display);
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -34,17 +47,28 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(1200px 700px at 10% -10%, rgba(43, 181, 154, 0.22), transparent 55%),
-    radial-gradient(900px 600px at 100% 0%, rgba(226, 162, 74, 0.18), transparent 50%),
-    radial-gradient(800px 500px at 50% 100%, rgba(217, 107, 76, 0.1), transparent 55%),
-    linear-gradient(180deg, #f7fcfa 0%, var(--paper) 40%, #eef6f3 100%);
-  background-attachment: fixed;
+  background: var(--paper);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+p {
+  margin: 0;
 }
 
 button,
 input {
   font: inherit;
+  color: inherit;
 }
 
 button {
@@ -53,4 +77,10 @@ button {
 
 a {
   color: inherit;
+  text-decoration: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--crimson);
+  outline-offset: 2px;
 }
