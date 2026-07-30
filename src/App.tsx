@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   averagePercents,
@@ -6,11 +6,19 @@ import {
   percentsToValues,
   type DivisionResult,
 } from './lib/rentDivision'
+import {
+  DEFAULT_RENT,
+  DEFAULT_ROOMS,
+  PEOPLE,
+  equalPercents,
+  loadStored,
+  readFileAsDataUrl,
+  renormalize,
+  saveStored,
+  type Room,
+} from './lib/house'
 
-type Step = 'home' | 'setup' | 'value' | 'results'
-
-const DEFAULT_ROOMS = ['Room 1', 'Room 2', 'Room 3']
-const DEFAULT_PEOPLE = ['Alex', 'Blake', 'Casey']
+type Step = 'home' | 'house' | 'value' | 'results'
 
 function money(n: number) {
   return n.toLocaleString(undefined, {
@@ -36,83 +44,73 @@ function BrandMark() {
   )
 }
 
-function equalPercents(n: number) {
-  const base = Math.floor((100 / n) * 10) / 10
-  const row = Array(n).fill(base)
-  const drift = 100 - base * n
-  row[n - 1] = Math.round((base + drift) * 10) / 10
-  return row
-}
-
-function renormalize(row: number[]): number[] {
-  const sum = row.reduce((a, b) => a + b, 0)
-  if (sum <= 0) return equalPercents(row.length)
-  return row.map((x) => Math.round((x / sum) * 1000) / 10)
-}
-
 export default function App() {
   const [step, setStep] = useState<Step>('home')
-  const [rent, setRent] = useState(3600)
-  const [rooms, setRooms] = useState<string[]>(DEFAULT_ROOMS)
-  const [people, setPeople] = useState<string[]>(DEFAULT_PEOPLE)
-  const [roomDraft, setRoomDraft] = useState('')
-  const [personDraft, setPersonDraft] = useState('')
+  const [rent, setRent] = useState(DEFAULT_RENT)
+  const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS)
+  const [floorPlan, setFloorPlan] = useState<string | null>(null)
+  const [roomImages, setRoomImages] = useState<Record<string, string | null>>({})
   const [activePerson, setActivePerson] = useState(0)
   const [percents, setPercents] = useState<number[][]>(
-    DEFAULT_PEOPLE.map(() => equalPercents(DEFAULT_ROOMS.length)),
+    PEOPLE.map(() => equalPercents(4)),
   )
   const [result, setResult] = useState<DivisionResult | null>(null)
+  const [hydrated, setHydrated] = useState(false)
+  const floorInputRef = useRef<HTMLInputElement>(null)
 
-  const n = Math.min(rooms.length, people.length)
-  const readySetup =
-    rooms.length >= 2 &&
-    people.length >= 2 &&
-    rooms.length === people.length &&
-    rent > 0
+  useEffect(() => {
+    const stored = loadStored()
+    if (stored) {
+      if (stored.rent) setRent(stored.rent)
+      if (stored.rooms?.length === 4) setRooms(stored.rooms)
+      if (stored.floorPlanDataUrl) setFloorPlan(stored.floorPlanDataUrl)
+      if (stored.roomImages) setRoomImages(stored.roomImages)
+      if (stored.percents?.length === 4) setPercents(stored.percents)
+    }
+    setHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!hydrated) return
+    saveStored({
+      rent,
+      rooms,
+      floorPlanDataUrl: floorPlan,
+      roomImages,
+      percents,
+    })
+  }, [hydrated, rent, rooms, floorPlan, roomImages, percents])
 
   const currentSum = useMemo(
     () => (percents[activePerson] ?? []).reduce((a, b) => a + b, 0),
     [percents, activePerson],
   )
 
-  const avg = averagePercents(
-    percents.slice(0, n).map((row) => renormalize(row.slice(0, n))),
-  )
+  const avg = averagePercents(percents.map((row) => renormalize(row)))
+  const filledPhotos = rooms.filter((r) => roomImages[r.id]).length
 
   const stepMeta = [
-    { id: 'setup' as const, label: 'Setup' },
+    { id: 'house' as const, label: 'House' },
     { id: 'value' as const, label: 'Value' },
     { id: 'results' as const, label: 'Discover' },
   ]
   const stepIndex = stepMeta.findIndex((s) => s.id === step)
 
-  function addRoom() {
-    const name = roomDraft.trim() || `Room ${rooms.length + 1}`
-    setRooms([...rooms, name])
-    setRoomDraft('')
-    setPercents((prev) => prev.map((row) => renormalize([...row, 0])))
+  async function onFloorPlan(files: FileList | null) {
+    const file = files?.[0]
+    if (!file) return
+    setFloorPlan(await readFileAsDataUrl(file))
   }
 
-  function addPerson() {
-    const name = personDraft.trim() || `Person ${people.length + 1}`
-    setPeople([...people, name])
-    setPersonDraft('')
-    setPercents((prev) => [...prev, equalPercents(rooms.length)])
+  async function onRoomImage(roomId: string, files: FileList | null) {
+    const file = files?.[0]
+    if (!file) return
+    const dataUrl = await readFileAsDataUrl(file)
+    setRoomImages((prev) => ({ ...prev, [roomId]: dataUrl }))
   }
 
-  function removeRoom(idx: number) {
-    if (rooms.length <= 2) return
-    setRooms(rooms.filter((_, i) => i !== idx))
-    setPercents((prev) =>
-      prev.map((row) => renormalize(row.filter((_, i) => i !== idx))),
-    )
-  }
-
-  function removePerson(idx: number) {
-    if (people.length <= 2) return
-    setPeople(people.filter((_, i) => i !== idx))
-    setPercents((prev) => prev.filter((_, i) => i !== idx))
-    setActivePerson(0)
+  function updateRoom(idx: number, patch: Partial<Room>) {
+    setRooms((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
   }
 
   function setPercent(person: number, room: number, value: number) {
@@ -130,26 +128,10 @@ export default function App() {
   }
 
   function runDiscovery() {
-    const size = Math.min(rooms.length, people.length)
-    const trimmedPeople = people.slice(0, size)
-    const trimmedRooms = rooms.slice(0, size)
-    const matrix = percents
-      .slice(0, size)
-      .map((row) => renormalize(row.slice(0, size)))
-    setPeople(trimmedPeople)
-    setRooms(trimmedRooms)
+    const matrix = percents.map((row) => renormalize(row))
     setPercents(matrix)
     setResult(divideRent(percentsToValues(matrix, rent), rent))
     setStep('results')
-  }
-
-  function loadDemo() {
-    setRooms(DEFAULT_ROOMS)
-    setPeople(DEFAULT_PEOPLE)
-    setRent(3600)
-    setPercents(DEFAULT_PEOPLE.map(() => equalPercents(3)))
-    setActivePerson(0)
-    setStep('setup')
   }
 
   return (
@@ -186,161 +168,176 @@ export default function App() {
           <section className="section">
             <div className="hero-grid">
               <div>
-                <span className="eyebrow">Fair rent division</span>
+                <span className="eyebrow">Eric · Jhona · Rian · Jake</span>
                 <h1 className="section-title display">Harmony</h1>
                 <p className="section-copy">
-                  Price each bedroom by perceived value, then let an envy-free
-                  algorithm discover who pays what — beyond square footage and
-                  gut adjustments.
+                  Four bedrooms. Four valuations. Envy-free rent — so the split
+                  comes from perceived value, not arbitrary math.
                 </p>
                 <div className="cta-row">
                   <button
                     className="btn btn-primary"
                     type="button"
-                    onClick={() => setStep('setup')}
+                    onClick={() => setStep('house')}
                   >
-                    Start price discovery
+                    Open the house
                   </button>
                   <button
                     className="btn btn-secondary"
                     type="button"
-                    onClick={loadDemo}
+                    onClick={() => {
+                      setActivePerson(0)
+                      setStep('value')
+                    }}
                   >
-                    Try a demo house
+                    Jump to values
                   </button>
                 </div>
               </div>
 
-              <aside className="hero-panel" aria-label="How it works">
-                <h2>How it works</h2>
-                <ol className="hero-list">
-                  <li>
-                    <span className="num">1</span>
-                    <div>
-                      <strong>Set the house</strong>
-                      <span>Rent, bedrooms, and roommates in equal count.</span>
-                    </div>
-                  </li>
-                  <li>
-                    <span className="num">2</span>
-                    <div>
-                      <strong>Score perceived value</strong>
-                      <span>Each person allocates 100% across rooms.</span>
-                    </div>
-                  </li>
-                  <li>
-                    <span className="num">3</span>
-                    <div>
-                      <strong>Discover prices</strong>
-                      <span>Assignment and rent so nobody wants to swap.</span>
-                    </div>
-                  </li>
-                </ol>
+              <aside className="hero-panel">
+                <h2>The crew</h2>
+                <ul className="crew-list">
+                  {PEOPLE.map((p, i) => (
+                    <li key={p.id}>
+                      <span className="num">{String(i + 1).padStart(2, '0')}</span>
+                      <strong>{p.name}</strong>
+                    </li>
+                  ))}
+                </ul>
+                <p className="panel-foot">
+                  {filledPhotos}/4 room photos · {floorPlan ? 'Floor plan ready' : 'Add floor plan'}
+                </p>
               </aside>
             </div>
+
+            {(floorPlan || filledPhotos > 0) && (
+              <div className="home-gallery">
+                {floorPlan && (
+                  <figure className="floor-figure">
+                    <img src={floorPlan} alt="Floor plan" />
+                    <figcaption>Floor plan</figcaption>
+                  </figure>
+                )}
+                <div className="room-thumbs">
+                  {rooms.map((room) => (
+                    <div className="room-thumb" key={room.id}>
+                      <span className="room-badge">{room.number}</span>
+                      {roomImages[room.id] ? (
+                        <img src={roomImages[room.id]!} alt={room.name} />
+                      ) : (
+                        <div className="thumb-empty">No photo</div>
+                      )}
+                      <span>{room.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
         )}
 
-        {step === 'setup' && (
+        {step === 'house' && (
           <section className="section">
-            <span className="eyebrow">01 / Setup</span>
-            <h1 className="section-title">Set the house</h1>
+            <span className="eyebrow">01 / House</span>
+            <h1 className="section-title">Rooms & photos</h1>
             <p className="section-copy">
-              Keep people and bedrooms equal. Total rent stays fixed — Harmony
-              redistributes who pays what.
+              Drop the floor plan and a photo for each numbered bedroom. Names
+              are fixed — Eric, Jhona, Rian, Jake.
             </p>
 
             <div className="form-stack">
-              <div className="form-grid">
-                <label className="field">
-                  <span className="field-label">Monthly rent</span>
+              <label className="field" style={{ maxWidth: 280 }}>
+                <span className="field-label">Monthly rent</span>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  value={rent}
+                  onChange={(e) => setRent(Number(e.target.value) || 0)}
+                />
+              </label>
+
+              <div className="panel">
+                <div className="panel-head-row">
+                  <div>
+                    <span className="field-label">Floor plan</span>
+                    <p className="note" style={{ marginTop: 6 }}>
+                      One image of the layout — bedrooms numbered 1–4.
+                    </p>
+                  </div>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={() => floorInputRef.current?.click()}
+                  >
+                    {floorPlan ? 'Replace' : 'Upload'}
+                  </button>
                   <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    value={rent}
-                    onChange={(e) => setRent(Number(e.target.value) || 0)}
+                    ref={floorInputRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={(e) => onFloorPlan(e.target.files)}
                   />
-                </label>
+                </div>
+                {floorPlan ? (
+                  <img className="floor-preview" src={floorPlan} alt="Floor plan" />
+                ) : (
+                  <button
+                    type="button"
+                    className="dropzone"
+                    onClick={() => floorInputRef.current?.click()}
+                  >
+                    Drop floor plan image here
+                  </button>
+                )}
               </div>
 
-              <div className="form-grid">
-                <div className="panel">
-                  <label className="field">
-                    <span className="field-label">Bedrooms</span>
-                  </label>
-                  <div className="chip-row">
-                    {rooms.map((room, i) => (
-                      <span className="chip" key={`${room}-${i}`}>
-                        {i + 1}. {room}
-                        <button
-                          type="button"
-                          aria-label={`Remove ${room}`}
-                          onClick={() => removeRoom(i)}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
+              <div className="room-photo-grid">
+                {rooms.map((room, idx) => (
+                  <div className="room-photo-card" key={room.id}>
+                    <div className="room-photo-media">
+                      <span className="room-badge lg">{room.number}</span>
+                      {roomImages[room.id] ? (
+                        <img src={roomImages[room.id]!} alt={room.name} />
+                      ) : (
+                        <div className="thumb-empty tall">Add photo</div>
+                      )}
+                    </div>
+                    <div className="room-photo-body">
+                      <label className="field">
+                        <span className="field-label">Bedroom {room.number}</span>
+                        <input
+                          className="input"
+                          type="text"
+                          value={room.name}
+                          onChange={(e) => updateRoom(idx, { name: e.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Notes</span>
+                        <input
+                          className="input"
+                          type="text"
+                          placeholder="Closet, window, ensuite…"
+                          value={room.notes}
+                          onChange={(e) => updateRoom(idx, { notes: e.target.value })}
+                        />
+                      </label>
+                      <label className="btn btn-secondary file-btn">
+                        {roomImages[room.id] ? 'Replace photo' : 'Upload photo'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          hidden
+                          onChange={(e) => onRoomImage(room.id, e.target.files)}
+                        />
+                      </label>
+                    </div>
                   </div>
-                  <div className="inline-add">
-                    <input
-                      className="input"
-                      type="text"
-                      placeholder="e.g. Corner suite"
-                      value={roomDraft}
-                      onChange={(e) => setRoomDraft(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && addRoom()}
-                    />
-                    <button className="btn btn-ghost" type="button" onClick={addRoom}>
-                      Add
-                    </button>
-                  </div>
-                </div>
-
-                <div className="panel">
-                  <label className="field">
-                    <span className="field-label">Roommates</span>
-                  </label>
-                  <div className="chip-row">
-                    {people.map((person, i) => (
-                      <span className="chip" key={`${person}-${i}`}>
-                        {person}
-                        <button
-                          type="button"
-                          aria-label={`Remove ${person}`}
-                          onClick={() => removePerson(i)}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                  <div className="inline-add">
-                    <input
-                      className="input"
-                      type="text"
-                      placeholder="Name"
-                      value={personDraft}
-                      onChange={(e) => setPersonDraft(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && addPerson()}
-                    />
-                    <button className="btn btn-ghost" type="button" onClick={addPerson}>
-                      Add
-                    </button>
-                  </div>
-                </div>
+                ))}
               </div>
-
-              {!readySetup && (
-                <p className="note warn">
-                  Need at least 2 rooms and 2 people, with equal counts
-                  {rooms.length !== people.length
-                    ? ` (now ${rooms.length} rooms / ${people.length} people)`
-                    : ''}
-                  .
-                </p>
-              )}
 
               <div className="actions">
                 <button
@@ -353,16 +350,7 @@ export default function App() {
                 <button
                   className="btn btn-primary"
                   type="button"
-                  disabled={!readySetup}
                   onClick={() => {
-                    const size = Math.min(rooms.length, people.length)
-                    setRooms(rooms.slice(0, size))
-                    setPeople(people.slice(0, size))
-                    setPercents((prev) =>
-                      prev
-                        .slice(0, size)
-                        .map((row) => renormalize(row.slice(0, size))),
-                    )
                     setActivePerson(0)
                     setStep('value')
                   }}
@@ -379,70 +367,87 @@ export default function App() {
             <span className="eyebrow">02 / Value</span>
             <h1 className="section-title">Perceived value</h1>
             <p className="section-copy">
-              Each roommate allocates 100% across bedrooms — the share of rent
-              that feels fair for each room. Pass the phone; answer honestly.
+              Pass the phone. Each person allocates 100% across the four
+              bedrooms — what share of {money(rent)} feels fair for each room.
             </p>
 
             <div className="tabs" role="tablist" aria-label="Roommate">
-              {people.map((person, i) => (
+              {PEOPLE.map((person, i) => (
                 <button
-                  key={person}
+                  key={person.id}
                   type="button"
                   role="tab"
                   aria-selected={i === activePerson}
                   className={`tab ${i === activePerson ? 'active' : ''}`}
                   onClick={() => setActivePerson(i)}
                 >
-                  {person}
+                  {person.name}
                 </button>
               ))}
             </div>
 
-            <div className="panel">
-              <div className="valuations">
-                {rooms.map((room, roomIdx) => (
-                  <div className="room-row" key={room}>
-                    <div className="room-row-top">
-                      <strong>
-                        {roomIdx + 1}. {room}
-                      </strong>
-                      <span>
-                        {(percents[activePerson]?.[roomIdx] ?? 0).toFixed(1)}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={0.5}
-                      aria-label={`Value for ${room}`}
-                      value={percents[activePerson]?.[roomIdx] ?? 0}
-                      onChange={(e) =>
-                        setPercent(activePerson, roomIdx, Number(e.target.value))
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
+            <div className="value-layout">
+              {floorPlan && (
+                <figure className="value-floor">
+                  <img src={floorPlan} alt="Floor plan reference" />
+                  <figcaption>Floor plan</figcaption>
+                </figure>
+              )}
 
-              <div
-                className={`sum-bar ${Math.abs(currentSum - 100) > 0.2 ? 'warn' : ''}`}
-              >
-                <span>{people[activePerson]}&apos;s total</span>
-                <span>{currentSum.toFixed(1)}% / 100%</span>
+              <div className="panel">
+                <div className="valuations">
+                  {rooms.map((room, roomIdx) => (
+                    <div className="room-row with-photo" key={room.id}>
+                      <div className="value-room-media">
+                        <span className="room-badge">{room.number}</span>
+                        {roomImages[room.id] ? (
+                          <img src={roomImages[room.id]!} alt={room.name} />
+                        ) : (
+                          <div className="thumb-empty">#{room.number}</div>
+                        )}
+                      </div>
+                      <div className="value-room-controls">
+                        <div className="room-row-top">
+                          <strong>{room.name}</strong>
+                          <span>
+                            {(percents[activePerson]?.[roomIdx] ?? 0).toFixed(1)}%
+                          </span>
+                        </div>
+                        {room.notes && <p className="note">{room.notes}</p>}
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={0.5}
+                          aria-label={`Value for ${room.name}`}
+                          value={percents[activePerson]?.[roomIdx] ?? 0}
+                          onChange={(e) =>
+                            setPercent(
+                              activePerson,
+                              roomIdx,
+                              Number(e.target.value),
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div
+                  className={`sum-bar ${Math.abs(currentSum - 100) > 0.2 ? 'warn' : ''}`}
+                >
+                  <span>{PEOPLE[activePerson].name}&apos;s total</span>
+                  <span>{currentSum.toFixed(1)}% / 100%</span>
+                </div>
               </div>
             </div>
-
-            <p className="note" style={{ marginTop: 16 }}>
-              Totals auto-normalize on discovery. Equal rooms ≈{' '}
-              {(100 / rooms.length).toFixed(1)}% each.
-            </p>
 
             <div className="actions" style={{ marginTop: 24 }}>
               <button
                 className="btn btn-ghost"
                 type="button"
-                onClick={() => setStep('setup')}
+                onClick={() => setStep('house')}
               >
                 Back
               </button>
@@ -453,7 +458,7 @@ export default function App() {
               >
                 Normalize to 100%
               </button>
-              {activePerson < people.length - 1 ? (
+              {activePerson < PEOPLE.length - 1 ? (
                 <button
                   className="btn btn-primary"
                   type="button"
@@ -462,7 +467,7 @@ export default function App() {
                     setActivePerson((p) => p + 1)
                   }}
                 >
-                  Next: {people[activePerson + 1]}
+                  Next: {PEOPLE[activePerson + 1].name}
                 </button>
               ) : (
                 <button
@@ -485,32 +490,46 @@ export default function App() {
             </span>
             <h1 className="section-title">Your fair prices</h1>
             <p className="section-copy">
-              Total {money(rent)}. Rooms assigned to maximize collective value,
-              then priced so nobody prefers another bundle.
+              Total {money(rent)} for Eric, Jhona, Rian, and Jake. Nobody should
+              want to swap rooms at these prices.
             </p>
 
             <div className="result-grid">
-              {result.assignment.map((roomIdx, personIdx) => (
-                <div className="result-card" key={people[personIdx]}>
-                  <div className="result-num">{roomIdx + 1}</div>
-                  <div className="result-meta">
-                    <strong>{people[personIdx]}</strong>
-                    <span>{rooms[roomIdx]}</span>
+              {result.assignment.map((roomIdx, personIdx) => {
+                const room = rooms[roomIdx]
+                return (
+                  <div className="result-card photo" key={PEOPLE[personIdx].id}>
+                    <div className="result-photo">
+                      <span className="room-badge">{room.number}</span>
+                      {roomImages[room.id] ? (
+                        <img src={roomImages[room.id]!} alt={room.name} />
+                      ) : (
+                        <div className="thumb-empty">#{room.number}</div>
+                      )}
+                    </div>
+                    <div className="result-meta">
+                      <strong>{PEOPLE[personIdx].name}</strong>
+                      <span>
+                        {room.name}
+                        {room.notes ? ` · ${room.notes}` : ''}
+                      </span>
+                    </div>
+                    <div className="result-price">
+                      {money(result.prices[roomIdx])}
+                    </div>
                   </div>
-                  <div className="result-price">
-                    {money(result.prices[roomIdx])}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             <div className="insight">
               <h3>Group signal</h3>
               <p>
                 Averaged perceived value:{' '}
-                {rooms.map((r, i) => `${r} ${avg[i]?.toFixed(1)}%`).join(' · ')}.
-                Harmony used individual valuations — not just the average — so
-                preferences still shape assignment.
+                {rooms
+                  .map((r, i) => `${r.name} ${avg[i]?.toFixed(1)}%`)
+                  .join(' · ')}
+                .
               </p>
             </div>
 
@@ -527,13 +546,13 @@ export default function App() {
                 type="button"
                 onClick={() => setStep('home')}
               >
-                Start over
+                Home
               </button>
             </div>
 
             <p className="footer-note">
-              Based on envy-free rent division (rental harmony / Spliddit-style
-              maximin). Assumes each person maximizes value minus rent.
+              Envy-free rent division for this house. Values persist in this
+              browser so you can pass the laptop around.
             </p>
           </section>
         )}
