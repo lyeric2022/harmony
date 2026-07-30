@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import {
   averagePercents,
@@ -7,13 +7,15 @@ import {
   type DivisionResult,
 } from './lib/rentDivision'
 import {
-  DEFAULT_FLOOR_PLAN,
-  DEFAULT_RENT,
   DEFAULT_ROOMS,
+  FLOOR_PLAN,
+  PCT_MAX,
+  PCT_MIN,
   PEOPLE,
+  RENT,
   equalPercents,
   loadStored,
-  readFileAsDataUrl,
+  redistributePercents,
   renormalize,
   saveStored,
   type Room,
@@ -47,27 +49,21 @@ function BrandMark() {
 
 export default function App() {
   const [step, setStep] = useState<Step>('home')
-  const [rent, setRent] = useState(DEFAULT_RENT)
   const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS)
-  const [floorPlan, setFloorPlan] = useState<string | null>(DEFAULT_FLOOR_PLAN)
-  const [roomImages, setRoomImages] = useState<Record<string, string | null>>({})
   const [activePerson, setActivePerson] = useState(0)
   const [percents, setPercents] = useState<number[][]>(
     PEOPLE.map(() => equalPercents(4)),
   )
+  const [locked, setLocked] = useState<boolean[][]>(
+    PEOPLE.map(() => Array(4).fill(false)),
+  )
   const [result, setResult] = useState<DivisionResult | null>(null)
   const [hydrated, setHydrated] = useState(false)
-  const floorInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const stored = loadStored()
     if (stored) {
-      if (stored.rent) setRent(stored.rent)
       if (stored.rooms?.length === 4) setRooms(stored.rooms)
-      // Prefer uploaded override; otherwise keep baked numbered plan
-      if (stored.floorPlanDataUrl) setFloorPlan(stored.floorPlanDataUrl)
-      else setFloorPlan(DEFAULT_FLOOR_PLAN)
-      if (stored.roomImages) setRoomImages(stored.roomImages)
       if (stored.percents?.length === 4) setPercents(stored.percents)
     }
     setHydrated(true)
@@ -75,22 +71,18 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated) return
-    saveStored({
-      rent,
-      rooms,
-      floorPlanDataUrl: floorPlan,
-      roomImages,
-      percents,
-    })
-  }, [hydrated, rent, rooms, floorPlan, roomImages, percents])
+    saveStored({ rooms, percents })
+  }, [hydrated, rooms, percents])
+
+  const activeRow = percents[activePerson] ?? equalPercents(4)
+  const activeLocks = locked[activePerson] ?? Array(4).fill(false)
 
   const currentSum = useMemo(
-    () => (percents[activePerson] ?? []).reduce((a, b) => a + b, 0),
-    [percents, activePerson],
+    () => activeRow.reduce((a, b) => a + b, 0),
+    [activeRow],
   )
 
   const avg = averagePercents(percents.map((row) => renormalize(row)))
-  const filledPhotos = rooms.filter((r) => roomImages[r.id]).length
 
   const stepMeta = [
     { id: 'house' as const, label: 'House' },
@@ -99,41 +91,49 @@ export default function App() {
   ]
   const stepIndex = stepMeta.findIndex((s) => s.id === step)
 
-  async function onFloorPlan(files: FileList | null) {
-    const file = files?.[0]
-    if (!file) return
-    setFloorPlan(await readFileAsDataUrl(file))
-  }
-
-  async function onRoomImage(roomId: string, files: FileList | null) {
-    const file = files?.[0]
-    if (!file) return
-    const dataUrl = await readFileAsDataUrl(file)
-    setRoomImages((prev) => ({ ...prev, [roomId]: dataUrl }))
-  }
-
   function updateRoom(idx: number, patch: Partial<Room>) {
     setRooms((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
   }
 
   function setPercent(person: number, room: number, value: number) {
     setPercents((prev) => {
-      const next = prev.map((row) => [...row])
-      next[person][room] = value
+      const locks = locked[person] ?? Array(prev[person].length).fill(false)
+      const next = prev.map((row, i) =>
+        i === person ? redistributePercents(row, locks, room, value) : row,
+      )
       return next
     })
   }
 
-  function normalizeActive() {
-    setPercents((prev) =>
-      prev.map((row, i) => (i === activePerson ? renormalize(row) : row)),
+  function toggleLock(person: number, room: number) {
+    setLocked((prev) =>
+      prev.map((row, i) =>
+        i === person ? row.map((v, j) => (j === room ? !v : v)) : row,
+      ),
     )
+  }
+
+  function resetEqualActive() {
+    setPercents((prev) =>
+      prev.map((row, i) =>
+        i === activePerson ? equalPercents(rooms.length) : row,
+      ),
+    )
+    setLocked((prev) =>
+      prev.map((row, i) =>
+        i === activePerson ? Array(rooms.length).fill(false) : row,
+      ),
+    )
+  }
+
+  function unlockedCount() {
+    return activeLocks.filter((v) => !v).length
   }
 
   function runDiscovery() {
     const matrix = percents.map((row) => renormalize(row))
     setPercents(matrix)
-    setResult(divideRent(percentsToValues(matrix, rent), rent))
+    setResult(divideRent(percentsToValues(matrix, RENT), RENT))
     setStep('results')
   }
 
@@ -208,109 +208,44 @@ export default function App() {
                     </li>
                   ))}
                 </ul>
-                <p className="panel-foot">
-                  Numbered floor plan loaded · {filledPhotos}/4 optional room photos
-                </p>
               </aside>
             </div>
 
-            {(floorPlan || filledPhotos > 0) && (
-              <div className="home-gallery">
-                {floorPlan && (
-                  <figure className="floor-figure">
-                    <img src={floorPlan} alt="Floor plan" />
-                    <figcaption>Floor plan</figcaption>
-                  </figure>
-                )}
-                <div className="room-thumbs">
-                  {rooms.map((room) => (
-                    <div className="room-thumb" key={room.id}>
-                      <span className="room-badge">{room.number}</span>
-                      {roomImages[room.id] ? (
-                        <img src={roomImages[room.id]!} alt={room.name} />
-                      ) : (
-                        <div className="thumb-empty">No photo</div>
-                      )}
-                      <span>{room.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <figure className="floor-figure home-floor">
+              <img src={FLOOR_PLAN} alt="Floor plan with bedrooms numbered 1–4" />
+              <figcaption>Bedrooms 1–4</figcaption>
+            </figure>
           </section>
         )}
 
         {step === 'house' && (
           <section className="section">
             <span className="eyebrow">01 / House</span>
-            <h1 className="section-title">Rooms & photos</h1>
+            <h1 className="section-title">The rooms</h1>
             <p className="section-copy">
-              Drop the floor plan and a photo for each numbered bedroom. Names
-              are fixed — Eric, Jhona, Rian, Jake.
+              Total rent is locked at {money(RENT)}. Confirm room labels —
+              numbers match the floor plan.
             </p>
 
             <div className="form-stack">
-              <label className="field" style={{ maxWidth: 280 }}>
+              <div className="rent-lock">
                 <span className="field-label">Monthly rent</span>
-                <input
-                  className="input"
-                  type="number"
-                  min={1}
-                  value={rent}
-                  onChange={(e) => setRent(Number(e.target.value) || 0)}
-                />
-              </label>
-
-              <div className="panel">
-                <div className="panel-head-row">
-                  <div>
-                    <span className="field-label">Floor plan</span>
-                    <p className="note" style={{ marginTop: 6 }}>
-                      One image of the layout — bedrooms numbered 1–4.
-                    </p>
-                  </div>
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={() => floorInputRef.current?.click()}
-                  >
-                    {floorPlan ? 'Replace' : 'Upload'}
-                  </button>
-                  <input
-                    ref={floorInputRef}
-                    type="file"
-                    accept="image/*"
-                    hidden
-                    onChange={(e) => onFloorPlan(e.target.files)}
-                  />
-                </div>
-                {floorPlan ? (
-                  <img className="floor-preview" src={floorPlan} alt="Floor plan" />
-                ) : (
-                  <button
-                    type="button"
-                    className="dropzone"
-                    onClick={() => floorInputRef.current?.click()}
-                  >
-                    Drop floor plan image here
-                  </button>
-                )}
+                <strong>{money(RENT)}</strong>
+                <span className="rent-lock-tag">Locked</span>
               </div>
 
-              <div className="room-photo-grid">
+              <figure className="floor-figure">
+                <img src={FLOOR_PLAN} alt="Floor plan with bedrooms numbered 1–4" />
+                <figcaption>Bedrooms 1–4</figcaption>
+              </figure>
+
+              <div className="room-list">
                 {rooms.map((room, idx) => (
-                  <div className="room-photo-card" key={room.id}>
-                    <div className="room-photo-media">
-                      <span className="room-badge lg">{room.number}</span>
-                      {roomImages[room.id] ? (
-                        <img src={roomImages[room.id]!} alt={room.name} />
-                      ) : (
-                        <div className="thumb-empty tall">Add photo</div>
-                      )}
-                    </div>
-                    <div className="room-photo-body">
+                  <div className="room-list-card" key={room.id}>
+                    <span className="room-num">{room.number}</span>
+                    <div className="room-list-fields">
                       <label className="field">
-                        <span className="field-label">Bedroom {room.number}</span>
+                        <span className="field-label">Name</span>
                         <input
                           className="input"
                           type="text"
@@ -323,18 +258,8 @@ export default function App() {
                         <input
                           className="input"
                           type="text"
-                          placeholder="Closet, window, ensuite…"
                           value={room.notes}
                           onChange={(e) => updateRoom(idx, { notes: e.target.value })}
-                        />
-                      </label>
-                      <label className="btn btn-secondary file-btn">
-                        {roomImages[room.id] ? 'Replace photo' : 'Upload photo'}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          hidden
-                          onChange={(e) => onRoomImage(room.id, e.target.files)}
                         />
                       </label>
                     </div>
@@ -370,8 +295,8 @@ export default function App() {
             <span className="eyebrow">02 / Value</span>
             <h1 className="section-title">Perceived value</h1>
             <p className="section-copy">
-              Pass the phone. Each person allocates 100% across the four
-              bedrooms — what share of {money(rent)} feels fair for each room.
+              Pass the phone. Each room is {PCT_MIN}–{PCT_MAX}% of {money(RENT)}.
+              Drag one — unlocked rooms rebalance. Lock to freeze a share.
             </p>
 
             <div className="tabs" role="tablist" aria-label="Roommate">
@@ -390,40 +315,57 @@ export default function App() {
             </div>
 
             <div className="value-layout">
-              {floorPlan && (
-                <figure className="value-floor">
-                  <img src={floorPlan} alt="Floor plan reference" />
-                  <figcaption>Floor plan</figcaption>
-                </figure>
-              )}
+              <figure className="value-floor">
+                <img src={FLOOR_PLAN} alt="Floor plan reference" />
+                <figcaption>Floor plan</figcaption>
+              </figure>
 
               <div className="panel">
                 <div className="valuations">
-                  {rooms.map((room, roomIdx) => (
-                    <div className="room-row with-photo" key={room.id}>
-                      <div className="value-room-media">
-                        <span className="room-badge">{room.number}</span>
-                        {roomImages[room.id] ? (
-                          <img src={roomImages[room.id]!} alt={room.name} />
-                        ) : (
-                          <div className="thumb-empty">#{room.number}</div>
-                        )}
-                      </div>
-                      <div className="value-room-controls">
+                  {rooms.map((room, roomIdx) => {
+                    const pct = activeRow[roomIdx] ?? 0
+                    const dollars = (pct / 100) * RENT
+                    const isLocked = activeLocks[roomIdx]
+                    return (
+                      <div
+                        className={`room-row ${isLocked ? 'locked' : ''}`}
+                        key={room.id}
+                      >
                         <div className="room-row-top">
-                          <strong>{room.name}</strong>
-                          <span>
-                            {(percents[activePerson]?.[roomIdx] ?? 0).toFixed(1)}%
-                          </span>
+                          <strong>
+                            {room.number}. {room.name}
+                          </strong>
+                          <div className="room-row-stats">
+                            <span className="room-price">{money(dollars)}</span>
+                            <span className="room-pct">{pct.toFixed(1)}%</span>
+                            <button
+                              type="button"
+                              className={`lock-btn ${isLocked ? 'on' : ''}`}
+                              aria-pressed={isLocked}
+                              aria-label={
+                                isLocked
+                                  ? `Unlock ${room.name}`
+                                  : `Lock ${room.name}`
+                              }
+                              onClick={() => toggleLock(activePerson, roomIdx)}
+                            >
+                              {isLocked ? 'Locked' : 'Lock'}
+                            </button>
+                          </div>
                         </div>
                         {room.notes && <p className="note">{room.notes}</p>}
+                        <div className="range-scale" aria-hidden>
+                          <span>{PCT_MIN}%</span>
+                          <span>{PCT_MAX}%</span>
+                        </div>
                         <input
                           type="range"
-                          min={0}
-                          max={100}
+                          min={PCT_MIN}
+                          max={PCT_MAX}
                           step={0.5}
+                          disabled={isLocked || unlockedCount() <= 1}
                           aria-label={`Value for ${room.name}`}
-                          value={percents[activePerson]?.[roomIdx] ?? 0}
+                          value={Math.min(PCT_MAX, Math.max(PCT_MIN, pct))}
                           onChange={(e) =>
                             setPercent(
                               activePerson,
@@ -433,15 +375,17 @@ export default function App() {
                           }
                         />
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
 
                 <div
                   className={`sum-bar ${Math.abs(currentSum - 100) > 0.2 ? 'warn' : ''}`}
                 >
                   <span>{PEOPLE[activePerson].name}&apos;s total</span>
-                  <span>{currentSum.toFixed(1)}% / 100%</span>
+                  <span>
+                    {money((currentSum / 100) * RENT)} · {currentSum.toFixed(1)}%
+                  </span>
                 </div>
               </div>
             </div>
@@ -457,16 +401,15 @@ export default function App() {
               <button
                 className="btn btn-secondary"
                 type="button"
-                onClick={normalizeActive}
+                onClick={resetEqualActive}
               >
-                Normalize to 100%
+                Reset equal
               </button>
               {activePerson < PEOPLE.length - 1 ? (
                 <button
                   className="btn btn-primary"
                   type="button"
                   onClick={() => {
-                    normalizeActive()
                     setActivePerson((p) => p + 1)
                   }}
                 >
@@ -493,7 +436,7 @@ export default function App() {
             </span>
             <h1 className="section-title">Your fair prices</h1>
             <p className="section-copy">
-              Total {money(rent)} for Eric, Jhona, Rian, and Jake. Nobody should
+              Total {money(RENT)} for Eric, Jhona, Rian, and Jake. Nobody should
               want to swap rooms at these prices.
             </p>
 
@@ -501,15 +444,8 @@ export default function App() {
               {result.assignment.map((roomIdx, personIdx) => {
                 const room = rooms[roomIdx]
                 return (
-                  <div className="result-card photo" key={PEOPLE[personIdx].id}>
-                    <div className="result-photo">
-                      <span className="room-badge">{room.number}</span>
-                      {roomImages[room.id] ? (
-                        <img src={roomImages[room.id]!} alt={room.name} />
-                      ) : (
-                        <div className="thumb-empty">#{room.number}</div>
-                      )}
-                    </div>
+                  <div className="result-card" key={PEOPLE[personIdx].id}>
+                    <div className="result-num">{room.number}</div>
                     <div className="result-meta">
                       <strong>{PEOPLE[personIdx].name}</strong>
                       <span>
