@@ -1123,7 +1123,7 @@ input[type='range']::-moz-range-thumb {
   position: fixed;
   z-index: 50;
   left: 50%;
-  bottom: max(24px, env(safe-area-inset-bottom));
+  top: max(16px, env(safe-area-inset-top));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -1133,14 +1133,8 @@ input[type='range']::-moz-range-thumb {
   pointer-events: none;
 }
 
-.step-value .toast-stack {
-  bottom: calc(84px + env(safe-area-inset-bottom));
-}
-
-@media (min-width: 768px) {
-  .step-value .toast-stack {
-    bottom: 110px;
-  }
+.shell:not(.step-home) .toast-stack {
+  top: max(64px, calc(52px + env(safe-area-inset-top)));
 }
 
 /* How it works */
@@ -1263,7 +1257,7 @@ input[type='range']::-moz-range-thumb {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
