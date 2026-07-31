@@ -636,20 +636,75 @@
   flex-wrap: wrap;
 }
 
-.room-price {
-  font-variant-numeric: tabular-nums;
-  color: var(--crimson);
-  font-weight: 500;
-  letter-spacing: -0.02em;
+.manual-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.room-pct {
-  font-variant-numeric: tabular-nums;
+.manual-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.manual-field:focus-within {
+  border-color: var(--ink);
+}
+
+.manual-field.price {
+  color: var(--crimson);
+}
+
+.manual-field.pct {
   color: var(--muted);
+}
+
+.manual-prefix,
+.manual-suffix {
   font-size: 13px;
   font-weight: 500;
-  min-width: 3.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.manual-input {
+  width: 4.25rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
   text-align: right;
+  padding: 0;
+  outline: none;
+}
+
+.manual-field.pct .manual-input {
+  width: 3.25rem;
+  font-size: 13px;
+}
+
+.manual-input:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .manual-input {
+    width: 3.5rem;
+  }
+
+  .manual-field.pct .manual-input {
+    width: 2.75rem;
+  }
 }
 
 .lock-btn {

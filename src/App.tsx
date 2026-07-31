@@ -50,6 +50,83 @@ function BrandMark() {
   )
 }
 
+/** Editable $ / % fields; commit on blur or Enter so typing isn't fighty. */
+function ManualValueInputs({
+  pct,
+  roomName,
+  disabled,
+  onCommitPct,
+}: {
+  pct: number
+  roomName: string
+  disabled: boolean
+  onCommitPct: (pct: number) => void
+}) {
+  const dollars = (pct / 100) * RENT
+  const [pctDraft, setPctDraft] = useState<string | null>(null)
+  const [priceDraft, setPriceDraft] = useState<string | null>(null)
+
+  function commitPct(raw: string) {
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return
+    onCommitPct(n)
+  }
+
+  function commitPrice(raw: string) {
+    const n = Number(raw.replace(/[$,\s]/g, ''))
+    if (!Number.isFinite(n)) return
+    onCommitPct((n / RENT) * 100)
+  }
+
+  return (
+    <div className="manual-inputs">
+      <label className="manual-field price">
+        <span className="manual-prefix">$</span>
+        <input
+          className="manual-input"
+          type="text"
+          inputMode="decimal"
+          disabled={disabled}
+          aria-label={`Dollar value for ${roomName}`}
+          value={
+            priceDraft ??
+            String(Math.round(dollars))
+          }
+          onFocus={() => setPriceDraft(String(Math.round(dollars)))}
+          onChange={(e) => setPriceDraft(e.target.value)}
+          onBlur={() => {
+            if (priceDraft !== null) commitPrice(priceDraft)
+            setPriceDraft(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          }}
+        />
+      </label>
+      <label className="manual-field pct">
+        <input
+          className="manual-input"
+          type="text"
+          inputMode="decimal"
+          disabled={disabled}
+          aria-label={`Percent value for ${roomName}`}
+          value={pctDraft ?? pct.toFixed(1)}
+          onFocus={() => setPctDraft(pct.toFixed(1))}
+          onChange={(e) => setPctDraft(e.target.value)}
+          onBlur={() => {
+            if (pctDraft !== null) commitPct(pctDraft)
+            setPctDraft(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          }}
+        />
+        <span className="manual-suffix">%</span>
+      </label>
+    </div>
+  )
+}
+
 export default function App() {
   const [step, setStep] = useState<Step>('home')
   const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS)
@@ -397,9 +474,9 @@ export default function App() {
             <span className="eyebrow">02 / Value</span>
             <h1 className="section-title">Perceived value</h1>
             <p className="section-copy">
-              Pass the phone (or open the same link). Each room is {PCT_MIN}–
-              {PCT_MAX}% of {money(RENT)}. Values autosave to the shared cloud
-              DB — anyone can edit and overwrite.
+              Pass the phone (or open the same link). Drag the slider or type a
+              % or $ — each room stays {PCT_MIN}–{PCT_MAX}% of {money(RENT)}.
+              Values autosave; anyone can edit and overwrite.
             </p>
 
             <div className="tabs" role="tablist" aria-label="Roommate">
@@ -427,7 +504,6 @@ export default function App() {
                 <div className="valuations">
                   {rooms.map((room, roomIdx) => {
                     const pct = activeRow[roomIdx] ?? 0
-                    const dollars = (pct / 100) * RENT
                     const isLocked = activeLocks[roomIdx]
                     return (
                       <div
@@ -439,8 +515,14 @@ export default function App() {
                             {room.number}. {room.name}
                           </strong>
                           <div className="room-row-stats">
-                            <span className="room-price">{money(dollars)}</span>
-                            <span className="room-pct">{pct.toFixed(1)}%</span>
+                            <ManualValueInputs
+                              pct={pct}
+                              roomName={room.name}
+                              disabled={isLocked || unlockedCount() <= 1}
+                              onCommitPct={(value) =>
+                                setPercent(activePerson, roomIdx, value)
+                              }
+                            />
                             <button
                               type="button"
                               className={`lock-btn ${isLocked ? 'on' : ''}`}
