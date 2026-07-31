@@ -25,6 +25,39 @@
   flex-wrap: wrap;
 }
 
+.nav-right {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
+.sync-pill {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 6px 10px;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-pill.ok {
+  color: var(--ink);
+}
+
+.sync-pill.bad {
+  color: var(--crimson);
+  border-color: rgba(167, 29, 49, 0.28);
+}
+
 .brand {
   display: inline-flex;
   align-items: center;

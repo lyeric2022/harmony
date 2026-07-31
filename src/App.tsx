@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   averagePercents,
@@ -20,6 +20,9 @@ import {
   saveStored,
   type Room,
 } from './lib/house'
+import { fetchHouse, saveHouse, supabaseConfigured } from './lib/sync'
+
+type SyncStatus = 'loading' | 'ready' | 'saving' | 'saved' | 'error' | 'offline'
 
 type Step = 'home' | 'house' | 'value' | 'results'
 
@@ -59,20 +62,111 @@ export default function App() {
   )
   const [result, setResult] = useState<DivisionResult | null>(null)
   const [hydrated, setHydrated] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(
+    supabaseConfigured ? 'loading' : 'offline',
+  )
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  const skipNextSave = useRef(true)
 
   useEffect(() => {
-    const stored = loadStored()
-    if (stored) {
-      if (stored.rooms?.length === 4) setRooms(stored.rooms)
-      if (stored.percents?.length === 4) setPercents(stored.percents)
+    let cancelled = false
+    async function hydrate() {
+      const local = loadStored()
+      if (local?.rooms?.length === 4) setRooms(local.rooms)
+      if (local?.percents?.length === 4) setPercents(local.percents)
+
+      if (!supabaseConfigured) {
+        setSyncStatus('offline')
+        setHydrated(true)
+        return
+      }
+
+      try {
+        const remote = await fetchHouse()
+        if (cancelled) return
+        if (remote?.rooms?.length === 4) setRooms(remote.rooms)
+        if (remote?.percents?.length === 4) setPercents(remote.percents)
+        if (remote?.updated_at) setLastSavedAt(remote.updated_at)
+        setSyncStatus('ready')
+        setSyncError(null)
+      } catch (err) {
+        if (cancelled) return
+        setSyncStatus('error')
+        setSyncError(err instanceof Error ? err.message : 'Failed to load')
+      } finally {
+        if (!cancelled) {
+          skipNextSave.current = true
+          setHydrated(true)
+        }
+      }
     }
-    setHydrated(true)
+    void hydrate()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
     if (!hydrated) return
     saveStored({ rooms, percents })
   }, [hydrated, rooms, percents])
+
+  useEffect(() => {
+    if (!hydrated || !supabaseConfigured) return
+    if (skipNextSave.current) {
+      skipNextSave.current = false
+      return
+    }
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        setSyncStatus('saving')
+        try {
+          const remote = await saveHouse({ rooms, percents })
+          setLastSavedAt(remote.updated_at)
+          setSyncStatus('saved')
+          setSyncError(null)
+        } catch (err) {
+          setSyncStatus('error')
+          setSyncError(err instanceof Error ? err.message : 'Failed to save')
+        }
+      })()
+    }, 600)
+    return () => window.clearTimeout(handle)
+  }, [hydrated, rooms, percents])
+
+  async function saveNow() {
+    if (!supabaseConfigured) return
+    setSyncStatus('saving')
+    try {
+      const remote = await saveHouse({ rooms, percents })
+      setLastSavedAt(remote.updated_at)
+      setSyncStatus('saved')
+      setSyncError(null)
+    } catch (err) {
+      setSyncStatus('error')
+      setSyncError(err instanceof Error ? err.message : 'Failed to save')
+    }
+  }
+
+  function syncLabel() {
+    switch (syncStatus) {
+      case 'loading':
+        return 'Loading shared values…'
+      case 'saving':
+        return 'Saving…'
+      case 'saved':
+        return lastSavedAt
+          ? `Saved · ${new Date(lastSavedAt).toLocaleTimeString()}`
+          : 'Saved'
+      case 'ready':
+        return 'Cloud sync ready'
+      case 'error':
+        return syncError ? `Sync error: ${syncError}` : 'Sync error'
+      case 'offline':
+        return 'Local only (no cloud)'
+    }
+  }
 
   const activeRow = percents[activePerson] ?? equalPercents(4)
   const activeLocks = locked[activePerson] ?? Array(4).fill(false)
@@ -153,18 +247,26 @@ export default function App() {
             <span className="brand-name">Harmony</span>
           </a>
 
-          {step !== 'home' && (
-            <nav className="steps" aria-label="Progress">
-              {stepMeta.map((s, i) => (
-                <span
-                  key={s.id}
-                  className={`step ${s.id === step ? 'active' : i < stepIndex ? 'done' : ''}`}
-                >
-                  {String(i + 1).padStart(2, '0')} {s.label}
-                </span>
-              ))}
-            </nav>
-          )}
+          <div className="nav-right">
+            <span
+              className={`sync-pill ${syncStatus === 'error' ? 'bad' : syncStatus === 'saved' || syncStatus === 'ready' ? 'ok' : ''}`}
+              title={syncError ?? undefined}
+            >
+              {syncLabel()}
+            </span>
+            {step !== 'home' && (
+              <nav className="steps" aria-label="Progress">
+                {stepMeta.map((s, i) => (
+                  <span
+                    key={s.id}
+                    className={`step ${s.id === step ? 'active' : i < stepIndex ? 'done' : ''}`}
+                  >
+                    {String(i + 1).padStart(2, '0')} {s.label}
+                  </span>
+                ))}
+              </nav>
+            )}
+          </div>
         </header>
 
         {step === 'home' && (
@@ -295,8 +397,9 @@ export default function App() {
             <span className="eyebrow">02 / Value</span>
             <h1 className="section-title">Perceived value</h1>
             <p className="section-copy">
-              Pass the phone. Each room is {PCT_MIN}–{PCT_MAX}% of {money(RENT)}.
-              Drag one — unlocked rooms rebalance. Lock to freeze a share.
+              Pass the phone (or open the same link). Each room is {PCT_MIN}–
+              {PCT_MAX}% of {money(RENT)}. Values autosave to the shared cloud
+              DB — anyone can edit and overwrite.
             </p>
 
             <div className="tabs" role="tablist" aria-label="Roommate">
@@ -405,23 +508,35 @@ export default function App() {
               >
                 Reset equal
               </button>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                disabled={!supabaseConfigured || syncStatus === 'saving'}
+                onClick={() => void saveNow()}
+              >
+                Save now
+              </button>
               {activePerson < PEOPLE.length - 1 ? (
                 <button
                   className="btn btn-primary"
                   type="button"
                   onClick={() => {
+                    void saveNow()
                     setActivePerson((p) => p + 1)
                   }}
                 >
-                  Next: {PEOPLE[activePerson + 1].name}
+                  Save · next {PEOPLE[activePerson + 1].name}
                 </button>
               ) : (
                 <button
                   className="btn btn-primary"
                   type="button"
-                  onClick={runDiscovery}
+                  onClick={() => {
+                    void saveNow()
+                    runDiscovery()
+                  }}
                 >
-                  Run price discovery
+                  Save · discover
                 </button>
               )}
             </div>
@@ -490,8 +605,9 @@ export default function App() {
             </div>
 
             <p className="footer-note">
-              Envy-free rent division for this house. Values persist in this
-              browser so you can pass the laptop around.
+              Envy-free rent division for this house. Everyone&apos;s values are
+              stored in Supabase (`harmony_houses` / crew) and reload for anyone
+              with the link.
             </p>
           </section>
         )}
