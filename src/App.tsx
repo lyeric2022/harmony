@@ -868,7 +868,40 @@ export default function App() {
               </article>
 
               <article className="how-card">
-                <h2>4. Example — reading the result</h2>
+                <h2>4. Do you pay what you bid — or less?</h2>
+                <p>
+                  <strong>Not exactly your bid, and not “the cheapest room you
+                  listed.”</strong> You get one assigned room and a price for
+                  that room.
+                </p>
+                <ul>
+                  <li>
+                    When the result shows <strong>Fair split</strong>{' '}
+                    (envy-free), each person pays{' '}
+                    <strong>at most</strong> what they said that assigned room
+                    was worth — usually less. Your surplus (value − price) for
+                    your room is ≥ 0, and at least as good as any other room at
+                    its price.
+                  </li>
+                  <li>
+                    Example: you put 30% on Bedroom 2 → {money(RENT * 0.3)}. If
+                    you’re assigned Bedroom 2, you’ll pay ≤ {money(RENT * 0.3)},
+                    not more.
+                  </li>
+                  <li>
+                    You might get a room that wasn’t your #1. That’s fine if its
+                    price is low enough that you still prefer that deal to
+                    paying more for a “nicer” room.
+                  </li>
+                  <li>
+                    If the badge says <strong>Approximate</strong>, the
+                    guarantee can slip — re-tweak values and run again.
+                  </li>
+                </ul>
+              </article>
+
+              <article className="how-card">
+                <h2>5. Example — reading the result</h2>
                 <p>Imagine the outcome looks like:</p>
                 <div className="how-table" role="table" aria-label="Example split">
                   <div className="how-row how-head" role="row">
@@ -916,7 +949,7 @@ export default function App() {
               </article>
 
               <article className="how-card">
-                <h2>5. Practical tips for this house</h2>
+                <h2>6. Practical tips for this house</h2>
                 <ul>
                   <li>
                     Confirm you&apos;re you before editing — honor system, but it
