@@ -18,7 +18,6 @@ import {
   redistributePercents,
   renormalize,
   saveStored,
-  type Room,
 } from './lib/house'
 import { fetchHouse, saveHouse, supabaseConfigured } from './lib/sync'
 
@@ -114,10 +113,27 @@ function ManualValueInputs({
   )
 }
 
+const IDENTITY_KEY = 'rent-split-identity'
+
+function readStoredIdentity(): number | null {
+  try {
+    const id = sessionStorage.getItem(IDENTITY_KEY)
+    if (!id) return null
+    const idx = PEOPLE.findIndex((p) => p.id === id)
+    return idx >= 0 ? idx : null
+  } catch {
+    return null
+  }
+}
+
 export default function App() {
-  const [step, setStep] = useState<Step>('value')
-  const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS)
+  const [step, setStep] = useState<Step>('home')
+  const [rooms] = useState(DEFAULT_ROOMS)
   const [activePerson, setActivePerson] = useState(0)
+  const [identity, setIdentity] = useState<number | null>(() =>
+    readStoredIdentity(),
+  )
+  const [confirmPerson, setConfirmPerson] = useState<number | null>(null)
   const [percents, setPercents] = useState<number[][]>(
     PEOPLE.map(() => equalPercents(4)),
   )
@@ -136,6 +152,7 @@ export default function App() {
   const saveGen = useRef(0)
   const toastId = useRef(0)
   const autosaveTimer = useRef<number | null>(null)
+  const afterConfirm = useRef<(() => void) | null>(null)
   const draftRef = useRef({ rooms, percents })
   draftRef.current = { rooms, percents }
 
@@ -195,7 +212,7 @@ export default function App() {
     async function hydrate() {
       const local = loadStored()
       // Optimistic: paint local draft immediately, then reconcile with cloud.
-      if (local?.rooms?.length === 4) setRooms(local.rooms)
+      // Rooms are fixed (not user-editable); only percents sync.
       if (local?.percents?.length === 4) setPercents(local.percents)
 
       if (!supabaseConfigured) {
@@ -208,7 +225,6 @@ export default function App() {
       try {
         const remote = await fetchHouse()
         if (cancelled) return
-        if (remote?.rooms?.length === 4) setRooms(remote.rooms)
         if (remote?.percents?.length === 4) setPercents(remote.percents)
         if (remote?.updated_at) setLastSavedAt(remote.updated_at)
         setSyncStatus('ready')
@@ -305,12 +321,45 @@ export default function App() {
     { id: 'results' as const, label: 'Split' },
   ]
   const stepIndex = stepMeta.findIndex((s) => s.id === step)
+  const canEdit = identity !== null && identity === activePerson
 
-  function updateRoom(idx: number, patch: Partial<Room>) {
-    setRooms((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+  function claimIdentity(personIdx: number) {
+    setIdentity(personIdx)
+    setActivePerson(personIdx)
+    try {
+      sessionStorage.setItem(IDENTITY_KEY, PEOPLE[personIdx].id)
+    } catch {
+      /* ignore */
+    }
+    pushToast(`Editing as ${PEOPLE[personIdx].name}`, 'ok')
+  }
+
+  /** Trust gate: confirm who you are before viewing/editing that person’s values. */
+  function askIdentity(personIdx: number, onDone?: () => void) {
+    if (identity === personIdx) {
+      setActivePerson(personIdx)
+      onDone?.()
+      return
+    }
+    afterConfirm.current = onDone ?? null
+    setConfirmPerson(personIdx)
+  }
+
+  function goToValues(personIdx?: number) {
+    const target = personIdx ?? identity ?? 0
+    askIdentity(target, () => setStep('value'))
+  }
+
+  function goToStep(next: Step) {
+    if (next === 'value') {
+      goToValues()
+      return
+    }
+    setStep(next)
   }
 
   function setPercent(person: number, room: number, value: number) {
+    if (identity !== person) return
     setPercents((prev) => {
       const locks = locked[person] ?? Array(prev[person].length).fill(false)
       const next = prev.map((row, i) =>
@@ -321,6 +370,7 @@ export default function App() {
   }
 
   function toggleLock(person: number, room: number) {
+    if (identity !== person) return
     const willLock = !(locked[person]?.[room] ?? false)
     setLocked((prev) =>
       prev.map((row, i) =>
@@ -332,6 +382,7 @@ export default function App() {
   }
 
   function resetEqualActive() {
+    if (!canEdit) return
     setPercents((prev) =>
       prev.map((row, i) =>
         i === activePerson ? equalPercents(rooms.length) : row,
@@ -361,6 +412,9 @@ export default function App() {
     )
   }
 
+  const confirmName =
+    confirmPerson !== null ? PEOPLE[confirmPerson].name : null
+
   return (
     <div className={`shell step-${step}`}>
       <div className="toast-stack" aria-live="polite" aria-relevant="additions">
@@ -375,9 +429,83 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {confirmPerson !== null && confirmName && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            setConfirmPerson(null)
+            afterConfirm.current = null
+          }}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="identity-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="modal-eyebrow">Trust check</p>
+            <h2 id="identity-title" className="modal-title">
+              Are you {confirmName}?
+            </h2>
+            <p className="modal-copy">
+              Only continue if that&apos;s you. This is honor-system — no login.
+            </p>
+
+            {identity === null && (
+              <div className="identity-pick">
+                {PEOPLE.map((person, i) => (
+                  <button
+                    key={person.id}
+                    type="button"
+                    className={`identity-option ${confirmPerson === i ? 'active' : ''}`}
+                    onClick={() => setConfirmPerson(i)}
+                  >
+                    {person.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setConfirmPerson(null)
+                  afterConfirm.current = null
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const idx = confirmPerson
+                  const done = afterConfirm.current
+                  afterConfirm.current = null
+                  setConfirmPerson(null)
+                  claimIdentity(idx)
+                  done?.()
+                }}
+              >
+                Yes, I&apos;m {confirmName}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="container">
         <header className="nav">
-          <div className="nav-left">
+          <button
+            type="button"
+            className="nav-home"
+            onClick={() => setStep('home')}
+          >
             <strong className="rent-chip">{money(RENT)}</strong>
             <span
               className={`sync-pill ${syncStatus === 'error' ? 'bad' : syncStatus === 'saved' || syncStatus === 'ready' ? 'ok' : ''}`}
@@ -390,45 +518,67 @@ export default function App() {
             >
               {syncLabel()}
             </span>
-          </div>
-          <nav className="steps" aria-label="Steps">
-            {stepMeta.map((s, i) => (
-              <button
-                key={s.id}
-                type="button"
-                className={`step ${s.id === step ? 'active' : i < stepIndex ? 'done' : ''}`}
-                onClick={() => setStep(s.id)}
-              >
-                <span className="step-num">{i + 1}</span>
-                <span className="step-label">{s.label}</span>
-              </button>
-            ))}
-          </nav>
+          </button>
+          {step !== 'home' && (
+            <nav className="steps" aria-label="Steps">
+              {stepMeta.map((s, i) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`step ${s.id === step ? 'active' : i < stepIndex ? 'done' : ''}`}
+                  onClick={() => goToStep(s.id)}
+                >
+                  <span className="step-num">{i + 1}</span>
+                  <span className="step-label">{s.label}</span>
+                </button>
+              ))}
+            </nav>
+          )}
         </header>
 
         {step === 'home' && (
           <section className="section">
-            <h1 className="section-title">Rent split</h1>
-            <p className="section-copy">
-              {money(RENT)} / mo · Eric, Jhona, Rian, Jake. Rate each bedroom,
-              then get a fair price per person.
-            </p>
-            <div className="cta-row">
-              <button
-                className="btn btn-primary"
-                type="button"
-                onClick={() => setStep('value')}
-              >
-                Enter values
-              </button>
-              <button
-                className="btn btn-secondary"
-                type="button"
-                onClick={() => setStep('house')}
-              >
-                Rooms
-              </button>
+            <div className="hero-grid">
+              <div>
+                <span className="eyebrow">Eric · Jhona · Rian · Jake</span>
+                <h1 className="section-title display">Rent split</h1>
+                <p className="section-copy">
+                  Four bedrooms. Everyone rates perceived value, then we find
+                  prices so nobody wants to swap — {money(RENT)} total.
+                </p>
+                <div className="cta-row">
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={() => goToValues()}
+                  >
+                    Enter my values
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => setStep('house')}
+                  >
+                    See rooms
+                  </button>
+                </div>
+              </div>
+
+              <aside className="hero-panel">
+                <h2>The crew</h2>
+                <ul className="crew-list">
+                  {PEOPLE.map((p, i) => (
+                    <li key={p.id}>
+                      <span className="num">
+                        {String(i + 1).padStart(2, '0')}
+                      </span>
+                      <strong>{p.name}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
             </div>
+
             <figure className="floor-figure home-floor">
               <img src={FLOOR_PLAN} alt="Floor plan with bedrooms numbered 1–4" />
               <figcaption>Bedrooms 1–4</figcaption>
@@ -440,47 +590,25 @@ export default function App() {
           <section className="section">
             <h1 className="section-title">Rooms</h1>
             <p className="section-copy">
-              {money(RENT)} locked. Numbers match the floor plan.
+              {money(RENT)} / mo. Numbers match the floor plan.
             </p>
 
             <div className="form-stack">
-              <details className="floor-details">
-                <summary>Floor plan</summary>
-                <figure className="floor-figure">
-                  <img
-                    src={FLOOR_PLAN}
-                    alt="Floor plan with bedrooms numbered 1–4"
-                  />
-                </figure>
-              </details>
+              <figure className="floor-figure">
+                <img
+                  src={FLOOR_PLAN}
+                  alt="Floor plan with bedrooms numbered 1–4"
+                />
+                <figcaption>Bedrooms 1–4</figcaption>
+              </figure>
 
               <div className="room-list">
-                {rooms.map((room, idx) => (
+                {rooms.map((room) => (
                   <div className="room-list-card" key={room.id}>
                     <span className="room-num">{room.number}</span>
                     <div className="room-list-fields">
-                      <label className="field">
-                        <span className="field-label">Name</span>
-                        <input
-                          className="input"
-                          type="text"
-                          value={room.name}
-                          onChange={(e) =>
-                            updateRoom(idx, { name: e.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span className="field-label">Notes</span>
-                        <input
-                          className="input"
-                          type="text"
-                          value={room.notes}
-                          onChange={(e) =>
-                            updateRoom(idx, { notes: e.target.value })
-                          }
-                        />
-                      </label>
+                      <strong className="room-fixed-name">{room.name}</strong>
+                      <p className="note">{room.notes}</p>
                     </div>
                   </div>
                 ))}
@@ -490,12 +618,9 @@ export default function App() {
                 <button
                   className="btn btn-primary"
                   type="button"
-                  onClick={() => {
-                    setActivePerson(0)
-                    setStep('value')
-                  }}
+                  onClick={() => goToValues()}
                 >
-                  Enter values
+                  Enter my values
                 </button>
               </div>
             </div>
@@ -506,8 +631,8 @@ export default function App() {
           <section className="section section-value">
             <h1 className="section-title">Your values</h1>
             <p className="section-copy">
-              Pick your name. Drag or type $ / % ({PCT_MIN}–{PCT_MAX}% each).
-              Autosaves for everyone.
+              Drag or type $ / % ({PCT_MIN}–{PCT_MAX}% each). Autosaves for the
+              group.
             </p>
 
             <div className="tabs" role="tablist" aria-label="Roommate">
@@ -517,13 +642,28 @@ export default function App() {
                   type="button"
                   role="tab"
                   aria-selected={i === activePerson}
-                  className={`tab ${i === activePerson ? 'active' : ''}`}
-                  onClick={() => setActivePerson(i)}
+                  className={`tab ${i === activePerson ? 'active' : ''} ${identity === i ? 'claimed' : ''}`}
+                  onClick={() => askIdentity(i)}
                 >
                   {person.name}
                 </button>
               ))}
             </div>
+
+            {!canEdit && (
+              <div className="identity-banner">
+                <span>
+                  Confirm you&apos;re {PEOPLE[activePerson].name} to edit.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => askIdentity(activePerson)}
+                >
+                  I&apos;m {PEOPLE[activePerson].name}
+                </button>
+              </div>
+            )}
 
             <details className="floor-details mobile-only">
               <summary>Floor plan</summary>
@@ -537,11 +677,13 @@ export default function App() {
                 <img src={FLOOR_PLAN} alt="Floor plan reference" />
               </figure>
 
-              <div className="panel">
+              <div className={`panel ${!canEdit ? 'panel-locked' : ''}`}>
                 <div className="valuations">
                   {rooms.map((room, roomIdx) => {
                     const pct = activeRow[roomIdx] ?? 0
                     const isLocked = activeLocks[roomIdx]
+                    const disabled =
+                      !canEdit || isLocked || unlockedCount() <= 1
                     return (
                       <div
                         className={`room-row ${isLocked ? 'locked' : ''}`}
@@ -560,6 +702,7 @@ export default function App() {
                             type="button"
                             className={`lock-btn ${isLocked ? 'on' : ''}`}
                             aria-pressed={isLocked}
+                            disabled={!canEdit}
                             aria-label={
                               isLocked
                                 ? `Unlock ${room.name}`
@@ -574,7 +717,7 @@ export default function App() {
                           <ManualValueInputs
                             pct={pct}
                             roomName={room.name}
-                            disabled={isLocked || unlockedCount() <= 1}
+                            disabled={disabled}
                             onCommitPct={(value) =>
                               setPercent(activePerson, roomIdx, value)
                             }
@@ -589,7 +732,7 @@ export default function App() {
                           min={PCT_MIN}
                           max={PCT_MAX}
                           step={0.5}
-                          disabled={isLocked || unlockedCount() <= 1}
+                          disabled={disabled}
                           aria-label={`Value for ${room.name}`}
                           value={Math.min(PCT_MAX, Math.max(PCT_MIN, pct))}
                           onChange={(e) =>
@@ -620,6 +763,7 @@ export default function App() {
               <button
                 className="btn btn-secondary"
                 type="button"
+                disabled={!canEdit}
                 onClick={resetEqualActive}
               >
                 Reset
@@ -627,7 +771,7 @@ export default function App() {
               <button
                 className="btn btn-secondary"
                 type="button"
-                disabled={!supabaseConfigured}
+                disabled={!canEdit || !supabaseConfigured}
                 onClick={() => saveNow('Saved')}
               >
                 Save
@@ -637,9 +781,8 @@ export default function App() {
                   className="btn btn-primary"
                   type="button"
                   onClick={() => {
-                    const next = PEOPLE[activePerson + 1].name
-                    saveNow(`Saved · ${next} next`)
-                    setActivePerson((p) => p + 1)
+                    if (canEdit) saveNow('Saved')
+                    askIdentity(activePerson + 1)
                   }}
                 >
                   Next · {PEOPLE[activePerson + 1].name}
@@ -649,7 +792,7 @@ export default function App() {
                   className="btn btn-primary"
                   type="button"
                   onClick={() => {
-                    saveNow('Saved')
+                    if (canEdit) saveNow('Saved')
                     runDiscovery()
                   }}
                 >
@@ -701,7 +844,7 @@ export default function App() {
               <button
                 className="btn btn-primary"
                 type="button"
-                onClick={() => setStep('value')}
+                onClick={() => goToValues()}
               >
                 Adjust values
               </button>
