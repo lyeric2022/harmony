@@ -1122,14 +1122,15 @@ input[type='range']::-moz-range-thumb {
 .toast-stack {
   position: fixed;
   z-index: 50;
-  left: 50%;
-  top: max(12px, env(safe-area-inset-top));
-  transform: translateX(-50%);
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  left: auto;
+  transform: none;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  width: min(360px, calc(100% - 32px));
+  align-items: stretch;
+  gap: 6px;
+  width: min(280px, calc(100% - 20px));
   pointer-events: none;
 }
 
@@ -1138,7 +1139,7 @@ input[type='range']::-moz-range-thumb {
 .step-value .toast-stack,
 .step-results .toast-stack,
 .step-how .toast-stack {
-  top: max(64px, calc(52px + env(safe-area-inset-top)));
+  top: max(56px, calc(48px + env(safe-area-inset-top)));
 }
 
 /* How it works */
@@ -1231,13 +1232,14 @@ input[type='range']::-moz-range-thumb {
   border-radius: var(--radius);
   background: var(--ink);
   color: #fafaf5;
-  padding: 12px 16px;
-  font-size: 13px;
+  padding: 8px 10px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: -0.01em;
   text-align: left;
-  box-shadow: var(--shadow-float);
-  animation: toast-in 180ms ease-out;
+  line-height: 1.3;
+  box-shadow: 0 4px 12px rgba(25, 25, 24, 0.12);
+  animation: toast-in 140ms ease-out;
   cursor: pointer;
 }
 
@@ -1261,11 +1263,11 @@ input[type='range']::-moz-range-thumb {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateX(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(0);
   }
 }
 
