@@ -37,22 +37,6 @@ function money(n: number) {
   })
 }
 
-function BrandMark() {
-  return (
-    <span className="brand-mark" aria-hidden>
-      <svg viewBox="0 0 24 24" fill="none">
-        <path
-          d="M5 17V10.5L12 5.5l7 5V17"
-          stroke="#191918"
-          strokeWidth="1.8"
-          strokeLinejoin="round"
-        />
-        <rect x="10" y="12" width="4" height="4" rx="1" fill="#A71D31" />
-      </svg>
-    </span>
-  )
-}
-
 /** Editable $ / % fields; commit on blur or Enter so typing isn't fighty. */
 function ManualValueInputs({
   pct,
@@ -131,7 +115,7 @@ function ManualValueInputs({
 }
 
 export default function App() {
-  const [step, setStep] = useState<Step>('home')
+  const [step, setStep] = useState<Step>('value')
   const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS)
   const [activePerson, setActivePerson] = useState(0)
   const [percents, setPercents] = useState<number[][]>(
@@ -291,19 +275,17 @@ export default function App() {
   function syncLabel() {
     switch (syncStatus) {
       case 'loading':
-        return 'Loading shared values…'
+        return 'Loading…'
       case 'saving':
         return 'Saving…'
       case 'saved':
-        return lastSavedAt
-          ? `Saved · ${new Date(lastSavedAt).toLocaleTimeString()}`
-          : 'Saved'
+        return 'Saved'
       case 'ready':
-        return 'Cloud sync ready'
+        return 'Synced'
       case 'error':
-        return syncError ? `Sync error: ${syncError}` : 'Sync error'
+        return 'Sync error'
       case 'offline':
-        return 'Local only (no cloud)'
+        return 'Local'
     }
   }
 
@@ -318,9 +300,9 @@ export default function App() {
   const avg = averagePercents(percents.map((row) => renormalize(row)))
 
   const stepMeta = [
-    { id: 'house' as const, label: 'House' },
-    { id: 'value' as const, label: 'Value' },
-    { id: 'results' as const, label: 'Discover' },
+    { id: 'house' as const, label: 'Rooms' },
+    { id: 'value' as const, label: 'Values' },
+    { id: 'results' as const, label: 'Split' },
   ]
   const stepIndex = stepMeta.findIndex((s) => s.id === step)
 
@@ -380,7 +362,7 @@ export default function App() {
   }
 
   return (
-    <div className="shell">
+    <div className={`shell step-${step}`}>
       <div className="toast-stack" aria-live="polite" aria-relevant="additions">
         {toasts.map((t) => (
           <button
@@ -395,84 +377,58 @@ export default function App() {
       </div>
       <div className="container">
         <header className="nav">
-          <a
-            className="brand"
-            href="#home"
-            onClick={(e) => {
-              e.preventDefault()
-              setStep('home')
-            }}
-          >
-            <BrandMark />
-            <span className="brand-name">Harmony</span>
-          </a>
-
-          <div className="nav-right">
+          <div className="nav-left">
+            <strong className="rent-chip">{money(RENT)}</strong>
             <span
               className={`sync-pill ${syncStatus === 'error' ? 'bad' : syncStatus === 'saved' || syncStatus === 'ready' ? 'ok' : ''}`}
-              title={syncError ?? undefined}
+              title={
+                syncError ??
+                (lastSavedAt
+                  ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}`
+                  : undefined)
+              }
             >
               {syncLabel()}
             </span>
-            {step !== 'home' && (
-              <nav className="steps" aria-label="Progress">
-                {stepMeta.map((s, i) => (
-                  <span
-                    key={s.id}
-                    className={`step ${s.id === step ? 'active' : i < stepIndex ? 'done' : ''}`}
-                  >
-                    {String(i + 1).padStart(2, '0')} {s.label}
-                  </span>
-                ))}
-              </nav>
-            )}
           </div>
+          <nav className="steps" aria-label="Steps">
+            {stepMeta.map((s, i) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`step ${s.id === step ? 'active' : i < stepIndex ? 'done' : ''}`}
+                onClick={() => setStep(s.id)}
+              >
+                <span className="step-num">{i + 1}</span>
+                <span className="step-label">{s.label}</span>
+              </button>
+            ))}
+          </nav>
         </header>
 
         {step === 'home' && (
           <section className="section">
-            <div className="hero-grid">
-              <div>
-                <span className="eyebrow">Eric · Jhona · Rian · Jake</span>
-                <h1 className="section-title display">Harmony</h1>
-                <p className="section-copy">
-                  Four bedrooms. Four valuations. Envy-free rent — so the split
-                  comes from perceived value, not arbitrary math.
-                </p>
-                <div className="cta-row">
-                  <button
-                    className="btn btn-primary"
-                    type="button"
-                    onClick={() => setStep('house')}
-                  >
-                    Open the house
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={() => {
-                      setActivePerson(0)
-                      setStep('value')
-                    }}
-                  >
-                    Jump to values
-                  </button>
-                </div>
-              </div>
-
-              <aside className="hero-panel">
-                <h2>The crew</h2>
-                <ul className="crew-list">
-                  {PEOPLE.map((p, i) => (
-                    <li key={p.id}>
-                      <span className="num">{String(i + 1).padStart(2, '0')}</span>
-                      <strong>{p.name}</strong>
-                    </li>
-                  ))}
-                </ul>
-              </aside>
+            <h1 className="section-title">Rent split</h1>
+            <p className="section-copy">
+              {money(RENT)} / mo · Eric, Jhona, Rian, Jake. Rate each bedroom,
+              then get a fair price per person.
+            </p>
+            <div className="cta-row">
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => setStep('value')}
+              >
+                Enter values
+              </button>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setStep('house')}
+              >
+                Rooms
+              </button>
             </div>
-
             <figure className="floor-figure home-floor">
               <img src={FLOOR_PLAN} alt="Floor plan with bedrooms numbered 1–4" />
               <figcaption>Bedrooms 1–4</figcaption>
@@ -482,24 +438,21 @@ export default function App() {
 
         {step === 'house' && (
           <section className="section">
-            <span className="eyebrow">01 / House</span>
-            <h1 className="section-title">The rooms</h1>
+            <h1 className="section-title">Rooms</h1>
             <p className="section-copy">
-              Total rent is locked at {money(RENT)}. Confirm room labels —
-              numbers match the floor plan.
+              {money(RENT)} locked. Numbers match the floor plan.
             </p>
 
             <div className="form-stack">
-              <div className="rent-lock">
-                <span className="field-label">Monthly rent</span>
-                <strong>{money(RENT)}</strong>
-                <span className="rent-lock-tag">Locked</span>
-              </div>
-
-              <figure className="floor-figure">
-                <img src={FLOOR_PLAN} alt="Floor plan with bedrooms numbered 1–4" />
-                <figcaption>Bedrooms 1–4</figcaption>
-              </figure>
+              <details className="floor-details">
+                <summary>Floor plan</summary>
+                <figure className="floor-figure">
+                  <img
+                    src={FLOOR_PLAN}
+                    alt="Floor plan with bedrooms numbered 1–4"
+                  />
+                </figure>
+              </details>
 
               <div className="room-list">
                 {rooms.map((room, idx) => (
@@ -512,7 +465,9 @@ export default function App() {
                           className="input"
                           type="text"
                           value={room.name}
-                          onChange={(e) => updateRoom(idx, { name: e.target.value })}
+                          onChange={(e) =>
+                            updateRoom(idx, { name: e.target.value })
+                          }
                         />
                       </label>
                       <label className="field">
@@ -521,7 +476,9 @@ export default function App() {
                           className="input"
                           type="text"
                           value={room.notes}
-                          onChange={(e) => updateRoom(idx, { notes: e.target.value })}
+                          onChange={(e) =>
+                            updateRoom(idx, { notes: e.target.value })
+                          }
                         />
                       </label>
                     </div>
@@ -529,14 +486,7 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="actions">
-                <button
-                  className="btn btn-ghost"
-                  type="button"
-                  onClick={() => setStep('home')}
-                >
-                  Back
-                </button>
+              <div className="actions actions-bar">
                 <button
                   className="btn btn-primary"
                   type="button"
@@ -545,7 +495,7 @@ export default function App() {
                     setStep('value')
                   }}
                 >
-                  Rate the rooms
+                  Enter values
                 </button>
               </div>
             </div>
@@ -553,13 +503,11 @@ export default function App() {
         )}
 
         {step === 'value' && (
-          <section className="section">
-            <span className="eyebrow">02 / Value</span>
-            <h1 className="section-title">Perceived value</h1>
+          <section className="section section-value">
+            <h1 className="section-title">Your values</h1>
             <p className="section-copy">
-              Pass the phone (or open the same link). Drag the slider or type a
-              % or $ — each room stays {PCT_MIN}–{PCT_MAX}% of {money(RENT)}.
-              Values autosave; anyone can edit and overwrite.
+              Pick your name. Drag or type $ / % ({PCT_MIN}–{PCT_MAX}% each).
+              Autosaves for everyone.
             </p>
 
             <div className="tabs" role="tablist" aria-label="Roommate">
@@ -577,10 +525,16 @@ export default function App() {
               ))}
             </div>
 
-            <div className="value-layout">
-              <figure className="value-floor">
+            <details className="floor-details mobile-only">
+              <summary>Floor plan</summary>
+              <figure className="floor-figure">
                 <img src={FLOOR_PLAN} alt="Floor plan reference" />
-                <figcaption>Floor plan</figcaption>
+              </figure>
+            </details>
+
+            <div className="value-layout">
+              <figure className="value-floor desktop-only">
+                <img src={FLOOR_PLAN} alt="Floor plan reference" />
               </figure>
 
               <div className="panel">
@@ -594,34 +548,38 @@ export default function App() {
                         key={room.id}
                       >
                         <div className="room-row-top">
-                          <strong>
-                            {room.number}. {room.name}
-                          </strong>
-                          <div className="room-row-stats">
-                            <ManualValueInputs
-                              pct={pct}
-                              roomName={room.name}
-                              disabled={isLocked || unlockedCount() <= 1}
-                              onCommitPct={(value) =>
-                                setPercent(activePerson, roomIdx, value)
-                              }
-                            />
-                            <button
-                              type="button"
-                              className={`lock-btn ${isLocked ? 'on' : ''}`}
-                              aria-pressed={isLocked}
-                              aria-label={
-                                isLocked
-                                  ? `Unlock ${room.name}`
-                                  : `Lock ${room.name}`
-                              }
-                              onClick={() => toggleLock(activePerson, roomIdx)}
-                            >
-                              {isLocked ? 'Locked' : 'Lock'}
-                            </button>
+                          <div className="room-row-title">
+                            <strong>
+                              {room.number}. {room.name}
+                            </strong>
+                            {room.notes && (
+                              <p className="note">{room.notes}</p>
+                            )}
                           </div>
+                          <button
+                            type="button"
+                            className={`lock-btn ${isLocked ? 'on' : ''}`}
+                            aria-pressed={isLocked}
+                            aria-label={
+                              isLocked
+                                ? `Unlock ${room.name}`
+                                : `Lock ${room.name}`
+                            }
+                            onClick={() => toggleLock(activePerson, roomIdx)}
+                          >
+                            {isLocked ? 'Locked' : 'Lock'}
+                          </button>
                         </div>
-                        {room.notes && <p className="note">{room.notes}</p>}
+                        <div className="room-row-stats">
+                          <ManualValueInputs
+                            pct={pct}
+                            roomName={room.name}
+                            disabled={isLocked || unlockedCount() <= 1}
+                            onCommitPct={(value) =>
+                              setPercent(activePerson, roomIdx, value)
+                            }
+                          />
+                        </div>
                         <div className="range-scale" aria-hidden>
                           <span>{PCT_MIN}%</span>
                           <span>{PCT_MAX}%</span>
@@ -650,7 +608,7 @@ export default function App() {
                 <div
                   className={`sum-bar ${Math.abs(currentSum - 100) > 0.2 ? 'warn' : ''}`}
                 >
-                  <span>{PEOPLE[activePerson].name}&apos;s total</span>
+                  <span>{PEOPLE[activePerson].name}</span>
                   <span>
                     {money((currentSum / 100) * RENT)} · {currentSum.toFixed(1)}%
                   </span>
@@ -658,20 +616,13 @@ export default function App() {
               </div>
             </div>
 
-            <div className="actions" style={{ marginTop: 24 }}>
-              <button
-                className="btn btn-ghost"
-                type="button"
-                onClick={() => setStep('house')}
-              >
-                Back
-              </button>
+            <div className="actions actions-bar">
               <button
                 className="btn btn-secondary"
                 type="button"
                 onClick={resetEqualActive}
               >
-                Reset equal
+                Reset
               </button>
               <button
                 className="btn btn-secondary"
@@ -679,7 +630,7 @@ export default function App() {
                 disabled={!supabaseConfigured}
                 onClick={() => saveNow('Saved')}
               >
-                Save now
+                Save
               </button>
               {activePerson < PEOPLE.length - 1 ? (
                 <button
@@ -691,7 +642,7 @@ export default function App() {
                     setActivePerson((p) => p + 1)
                   }}
                 >
-                  Save · next {PEOPLE[activePerson + 1].name}
+                  Next · {PEOPLE[activePerson + 1].name}
                 </button>
               ) : (
                 <button
@@ -702,7 +653,7 @@ export default function App() {
                     runDiscovery()
                   }}
                 >
-                  Save · discover
+                  See split
                 </button>
               )}
             </div>
@@ -711,14 +662,12 @@ export default function App() {
 
         {step === 'results' && result && (
           <section className="section">
-            <span className="eyebrow">03 / Discover</span>
             <span className={`badge ${result.envyFree ? 'ok' : ''}`}>
-              {result.envyFree ? 'Envy-free split' : 'Approximate split'}
+              {result.envyFree ? 'Fair split' : 'Approximate'}
             </span>
-            <h1 className="section-title">Your fair prices</h1>
+            <h1 className="section-title">Prices</h1>
             <p className="section-copy">
-              Total {money(RENT)} for Eric, Jhona, Rian, and Jake. Nobody should
-              want to swap rooms at these prices.
+              {money(RENT)} total. Nobody should want to swap at these prices.
             </p>
 
             <div className="result-grid">
@@ -729,10 +678,7 @@ export default function App() {
                     <div className="result-num">{room.number}</div>
                     <div className="result-meta">
                       <strong>{PEOPLE[personIdx].name}</strong>
-                      <span>
-                        {room.name}
-                        {room.notes ? ` · ${room.notes}` : ''}
-                      </span>
+                      <span>{room.name}</span>
                     </div>
                     <div className="result-price">
                       {money(result.prices[roomIdx])}
@@ -743,38 +689,23 @@ export default function App() {
             </div>
 
             <div className="insight">
-              <h3>Group signal</h3>
+              <h3>Group average</h3>
               <p>
-                Averaged perceived value:{' '}
                 {rooms
                   .map((r, i) => `${r.name} ${avg[i]?.toFixed(1)}%`)
                   .join(' · ')}
-                .
               </p>
             </div>
 
-            <div className="actions">
+            <div className="actions actions-bar">
               <button
-                className="btn btn-ghost"
+                className="btn btn-primary"
                 type="button"
                 onClick={() => setStep('value')}
               >
                 Adjust values
               </button>
-              <button
-                className="btn btn-secondary"
-                type="button"
-                onClick={() => setStep('home')}
-              >
-                Home
-              </button>
             </div>
-
-            <p className="footer-note">
-              Envy-free rent division for this house. Everyone&apos;s values are
-              stored in Supabase (`harmony_houses` / crew) and reload for anyone
-              with the link.
-            </p>
           </section>
         )}
       </div>
