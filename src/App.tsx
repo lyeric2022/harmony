@@ -26,6 +26,9 @@ type SyncStatus = 'loading' | 'ready' | 'saving' | 'saved' | 'error' | 'offline'
 
 type Step = 'home' | 'house' | 'value' | 'results'
 
+type ToastTone = 'ok' | 'bad' | 'neutral'
+type Toast = { id: number; message: string; tone: ToastTone }
+
 function money(n: number) {
   return n.toLocaleString(undefined, {
     style: 'currency',
@@ -144,18 +147,77 @@ export default function App() {
   )
   const [syncError, setSyncError] = useState<string | null>(null)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  const [toasts, setToasts] = useState<Toast[]>([])
   const skipNextSave = useRef(true)
+  const saveGen = useRef(0)
+  const toastId = useRef(0)
+  const autosaveTimer = useRef<number | null>(null)
+  const draftRef = useRef({ rooms, percents })
+  draftRef.current = { rooms, percents }
+
+  function pushToast(message: string, tone: ToastTone = 'neutral') {
+    const id = ++toastId.current
+    setToasts((prev) => [...prev.slice(-3), { id, message, tone }])
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 2800)
+  }
+
+  function dismissToast(id: number) {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
+  }
+
+  /** Mark saved in the UI immediately; confirm (or fail) in the background. */
+  function persistOptimistic(toast?: string) {
+    if (autosaveTimer.current !== null) {
+      window.clearTimeout(autosaveTimer.current)
+      autosaveTimer.current = null
+    }
+
+    if (!supabaseConfigured) {
+      if (toast) pushToast(toast, 'ok')
+      return
+    }
+    const at = new Date().toISOString()
+    setLastSavedAt(at)
+    setSyncStatus('saved')
+    setSyncError(null)
+    if (toast) pushToast(toast, 'ok')
+
+    const gen = ++saveGen.current
+    const payload = {
+      rooms: draftRef.current.rooms,
+      percents: draftRef.current.percents,
+    }
+    void (async () => {
+      try {
+        const remote = await saveHouse(payload)
+        if (gen !== saveGen.current) return
+        setLastSavedAt(remote.updated_at)
+        setSyncStatus('saved')
+        setSyncError(null)
+      } catch (err) {
+        if (gen !== saveGen.current) return
+        const message = err instanceof Error ? err.message : 'Failed to save'
+        setSyncStatus('error')
+        setSyncError(message)
+        pushToast(`Couldn’t save — ${message}`, 'bad')
+      }
+    })()
+  }
 
   useEffect(() => {
     let cancelled = false
     async function hydrate() {
       const local = loadStored()
+      // Optimistic: paint local draft immediately, then reconcile with cloud.
       if (local?.rooms?.length === 4) setRooms(local.rooms)
       if (local?.percents?.length === 4) setPercents(local.percents)
 
       if (!supabaseConfigured) {
         setSyncStatus('offline')
         setHydrated(true)
+        pushToast('Local only — cloud sync off', 'neutral')
         return
       }
 
@@ -167,10 +229,16 @@ export default function App() {
         if (remote?.updated_at) setLastSavedAt(remote.updated_at)
         setSyncStatus('ready')
         setSyncError(null)
+        pushToast(
+          remote ? 'Loaded shared values' : 'No cloud draft yet — you’re first',
+          'ok',
+        )
       } catch (err) {
         if (cancelled) return
+        const message = err instanceof Error ? err.message : 'Failed to load'
         setSyncStatus('error')
-        setSyncError(err instanceof Error ? err.message : 'Failed to load')
+        setSyncError(message)
+        pushToast(`Couldn’t load cloud — using local`, 'bad')
       } finally {
         if (!cancelled) {
           skipNextSave.current = true
@@ -195,35 +263,29 @@ export default function App() {
       skipNextSave.current = false
       return
     }
-    const handle = window.setTimeout(() => {
-      void (async () => {
-        setSyncStatus('saving')
-        try {
-          const remote = await saveHouse({ rooms, percents })
-          setLastSavedAt(remote.updated_at)
-          setSyncStatus('saved')
-          setSyncError(null)
-        } catch (err) {
-          setSyncStatus('error')
-          setSyncError(err instanceof Error ? err.message : 'Failed to save')
-        }
-      })()
+    // Optimistic UI: show saved now; toast + network after debounce.
+    const at = new Date().toISOString()
+    setLastSavedAt(at)
+    setSyncStatus('saved')
+    setSyncError(null)
+
+    if (autosaveTimer.current !== null) {
+      window.clearTimeout(autosaveTimer.current)
+    }
+    autosaveTimer.current = window.setTimeout(() => {
+      autosaveTimer.current = null
+      persistOptimistic('Saved')
     }, 600)
-    return () => window.clearTimeout(handle)
+    return () => {
+      if (autosaveTimer.current !== null) {
+        window.clearTimeout(autosaveTimer.current)
+        autosaveTimer.current = null
+      }
+    }
   }, [hydrated, rooms, percents])
 
-  async function saveNow() {
-    if (!supabaseConfigured) return
-    setSyncStatus('saving')
-    try {
-      const remote = await saveHouse({ rooms, percents })
-      setLastSavedAt(remote.updated_at)
-      setSyncStatus('saved')
-      setSyncError(null)
-    } catch (err) {
-      setSyncStatus('error')
-      setSyncError(err instanceof Error ? err.message : 'Failed to save')
-    }
+  function saveNow(toast = 'Saved') {
+    persistOptimistic(toast)
   }
 
   function syncLabel() {
@@ -277,11 +339,14 @@ export default function App() {
   }
 
   function toggleLock(person: number, room: number) {
+    const willLock = !(locked[person]?.[room] ?? false)
     setLocked((prev) =>
       prev.map((row, i) =>
         i === person ? row.map((v, j) => (j === room ? !v : v)) : row,
       ),
     )
+    const roomName = rooms[room]?.name ?? `Room ${room + 1}`
+    pushToast(willLock ? `Locked ${roomName}` : `Unlocked ${roomName}`)
   }
 
   function resetEqualActive() {
@@ -295,6 +360,7 @@ export default function App() {
         i === activePerson ? Array(rooms.length).fill(false) : row,
       ),
     )
+    pushToast(`Reset ${PEOPLE[activePerson].name} to equal`, 'ok')
   }
 
   function unlockedCount() {
@@ -304,12 +370,29 @@ export default function App() {
   function runDiscovery() {
     const matrix = percents.map((row) => renormalize(row))
     setPercents(matrix)
-    setResult(divideRent(percentsToValues(matrix, RENT), RENT))
+    const next = divideRent(percentsToValues(matrix, RENT), RENT)
+    setResult(next)
     setStep('results')
+    pushToast(
+      next.envyFree ? 'Envy-free split ready' : 'Approximate split ready',
+      'ok',
+    )
   }
 
   return (
     <div className="shell">
+      <div className="toast-stack" aria-live="polite" aria-relevant="additions">
+        {toasts.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`toast toast-${t.tone}`}
+            onClick={() => dismissToast(t.id)}
+          >
+            {t.message}
+          </button>
+        ))}
+      </div>
       <div className="container">
         <header className="nav">
           <a
@@ -593,8 +676,8 @@ export default function App() {
               <button
                 className="btn btn-secondary"
                 type="button"
-                disabled={!supabaseConfigured || syncStatus === 'saving'}
-                onClick={() => void saveNow()}
+                disabled={!supabaseConfigured}
+                onClick={() => saveNow('Saved')}
               >
                 Save now
               </button>
@@ -603,7 +686,8 @@ export default function App() {
                   className="btn btn-primary"
                   type="button"
                   onClick={() => {
-                    void saveNow()
+                    const next = PEOPLE[activePerson + 1].name
+                    saveNow(`Saved · ${next} next`)
                     setActivePerson((p) => p + 1)
                   }}
                 >
@@ -614,7 +698,7 @@ export default function App() {
                   className="btn btn-primary"
                   type="button"
                   onClick={() => {
-                    void saveNow()
+                    saveNow('Saved')
                     runDiscovery()
                   }}
                 >
