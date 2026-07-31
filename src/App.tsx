@@ -23,7 +23,7 @@ import { fetchHouse, saveHouse, supabaseConfigured } from './lib/sync'
 
 type SyncStatus = 'loading' | 'ready' | 'saving' | 'saved' | 'error' | 'offline'
 
-type Step = 'home' | 'house' | 'value' | 'results'
+type Step = 'home' | 'house' | 'value' | 'results' | 'how'
 
 type ToastTone = 'ok' | 'bad' | 'neutral'
 type Toast = { id: number; message: string; tone: ToastTone }
@@ -319,6 +319,7 @@ export default function App() {
     { id: 'house' as const, label: 'Rooms' },
     { id: 'value' as const, label: 'Values' },
     { id: 'results' as const, label: 'Split' },
+    { id: 'how' as const, label: 'How' },
   ]
   const stepIndex = stepMeta.findIndex((s) => s.id === step)
   const canEdit = identity !== null && identity === activePerson
@@ -353,6 +354,10 @@ export default function App() {
   function goToStep(next: Step) {
     if (next === 'value') {
       goToValues()
+      return
+    }
+    if (next === 'results' && !result) {
+      pushToast('Enter values first, then see the split', 'neutral')
       return
     }
     setStep(next)
@@ -557,9 +562,16 @@ export default function App() {
                   <button
                     className="btn btn-secondary"
                     type="button"
+                    onClick={() => setStep('how')}
+                  >
+                    How it works
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
                     onClick={() => setStep('house')}
                   >
-                    See rooms
+                    Rooms
                   </button>
                 </div>
               </div>
@@ -614,7 +626,7 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="actions actions-bar">
+              <div className="actions inline-actions">
                 <button
                   className="btn btn-primary"
                   type="button"
@@ -759,46 +771,189 @@ export default function App() {
               </div>
             </div>
 
-            <div className="actions actions-bar">
-              <button
-                className="btn btn-secondary"
-                type="button"
-                disabled={!canEdit}
-                onClick={resetEqualActive}
-              >
-                Reset
-              </button>
-              <button
-                className="btn btn-secondary"
-                type="button"
-                disabled={!canEdit || !supabaseConfigured}
-                onClick={() => saveNow('Saved')}
-              >
-                Save
-              </button>
-              {activePerson < PEOPLE.length - 1 ? (
+            <div className="footer-spacer" aria-hidden />
+          </section>
+        )}
+
+        {step === 'how' && (
+          <section className="section section-how">
+            <h1 className="section-title">How it works</h1>
+            <p className="section-copy">
+              Fair rent from what each person thinks each bedroom is worth — not
+              from square footage alone.
+            </p>
+
+            <div className="how-stack">
+              <article className="how-card">
+                <h2>1. Everyone values the rooms</h2>
+                <p>
+                  Total rent is locked at <strong>{money(RENT)}</strong>. Each
+                  person splits that into four shares — one per bedroom — using
+                  percents (or dollars). Shares must sum to 100%, and each room
+                  stays between {PCT_MIN}% and {PCT_MAX}% so nobody can zero out
+                  a room or claim almost everything.
+                </p>
+                <p>
+                  Your numbers mean: “If I paid this much for this room, I’d feel
+                  indifferent about which room I got.” Higher % = you want that
+                  room more (or think it’s worth more).
+                </p>
+              </article>
+
+              <article className="how-card">
+                <h2>2. Example — one person’s values</h2>
+                <p>Suppose Eric sees the house like this:</p>
+                <div className="how-table" role="table" aria-label="Example values">
+                  <div className="how-row how-head" role="row">
+                    <span role="columnheader">Room</span>
+                    <span role="columnheader">His %</span>
+                    <span role="columnheader">In $</span>
+                  </div>
+                  <div className="how-row" role="row">
+                    <span>Bedroom 1 (downstairs)</span>
+                    <span>20%</span>
+                    <span>{money(RENT * 0.2)}</span>
+                  </div>
+                  <div className="how-row" role="row">
+                    <span>Bedroom 2 (largest / L)</span>
+                    <span>35%</span>
+                    <span>{money(RENT * 0.35)}</span>
+                  </div>
+                  <div className="how-row" role="row">
+                    <span>Bedroom 3</span>
+                    <span>25%</span>
+                    <span>{money(RENT * 0.25)}</span>
+                  </div>
+                  <div className="how-row" role="row">
+                    <span>Bedroom 4 (over void)</span>
+                    <span>20%</span>
+                    <span>{money(RENT * 0.2)}</span>
+                  </div>
+                </div>
+                <p>
+                  So Eric would be happy paying about {money(RENT * 0.35)} for
+                  Bedroom 2, but only {money(RENT * 0.2)} for Bedroom 4. Jhona,
+                  Rian, and Jake each submit their own row — maybe Jhona loves
+                  the downstairs room and puts 32% on Bedroom 1.
+                </p>
+              </article>
+
+              <article className="how-card">
+                <h2>3. The app assigns rooms + prices</h2>
+                <p>
+                  After all four rows are in, we solve an{' '}
+                  <strong>envy-free rent division</strong> (same idea as
+                  Spliddit / the NYT rent calculator):
+                </p>
+                <ul>
+                  <li>
+                    Each person gets exactly one bedroom.
+                  </li>
+                  <li>
+                    The four prices add up to {money(RENT)}.
+                  </li>
+                  <li>
+                    <strong>Envy-free:</strong> at those prices, nobody prefers
+                    someone else’s room to their own. In other words, for every
+                    person, (value of my room − my price) ≥ (value of your room −
+                    your price).
+                  </li>
+                  <li>
+                    Among envy-free solutions, we prefer ones that maximize the
+                    worst-off person’s surplus (value − price) — so the split
+                    isn’t only “fair,” it’s also trying to leave everyone as
+                    whole as possible.
+                  </li>
+                </ul>
+              </article>
+
+              <article className="how-card">
+                <h2>4. Example — reading the result</h2>
+                <p>Imagine the outcome looks like:</p>
+                <div className="how-table" role="table" aria-label="Example split">
+                  <div className="how-row how-head" role="row">
+                    <span role="columnheader">Person</span>
+                    <span role="columnheader">Room</span>
+                    <span role="columnheader">Pays</span>
+                  </div>
+                  <div className="how-row" role="row">
+                    <span>Eric</span>
+                    <span>Bedroom 3</span>
+                    <span>{money(1800)}</span>
+                  </div>
+                  <div className="how-row" role="row">
+                    <span>Jhona</span>
+                    <span>Bedroom 1</span>
+                    <span>{money(2100)}</span>
+                  </div>
+                  <div className="how-row" role="row">
+                    <span>Rian</span>
+                    <span>Bedroom 2</span>
+                    <span>{money(2200)}</span>
+                  </div>
+                  <div className="how-row" role="row">
+                    <span>Jake</span>
+                    <span>Bedroom 4</span>
+                    <span>{money(1460)}</span>
+                  </div>
+                </div>
+                <p>
+                  Rian pays more because the group (and Rian) valued Bedroom 2
+                  highly. Jake pays less for Bedroom 4. Eric might have valued
+                  Bedroom 2 even higher than Rian, but if Eric’s surplus is still
+                  best in Bedroom 3 at {money(1800)}, he doesn’t envy Rian’s
+                  deal — that’s the envy-free check.
+                </p>
+                <p>
+                  If Eric valued Bedroom 2 at {money(RENT * 0.35)} and it costs
+                  {money(2200)}, his surplus there would be{' '}
+                  {money(RENT * 0.35 - 2200)}. If Bedroom 3 is worth{' '}
+                  {money(RENT * 0.25)} to him at a price of {money(1800)}, surplus
+                  is {money(RENT * 0.25 - 1800)}. Whichever surplus is higher is
+                  the room he’d rather have; the solver picks prices/assignment
+                  so each person’s own room wins that comparison.
+                </p>
+              </article>
+
+              <article className="how-card">
+                <h2>5. Practical tips for this house</h2>
+                <ul>
+                  <li>
+                    Confirm you&apos;re you before editing — honor system, but it
+                    stops accidental overwrites.
+                  </li>
+                  <li>
+                    Lock a room once you’re happy with its share; the other
+                    unlocked rooms rebalance to keep the total at 100%.
+                  </li>
+                  <li>
+                    Values autosave to the shared cloud. Last write wins — talk
+                    to each other if two people edit at once.
+                  </li>
+                  <li>
+                    Square footage is a signal (~110 / 130 / 80 / 65 sq ft for
+                    rooms 1–4), not the answer. Light, noise, ensuite, and the
+                    void matter too — that’s why we use perceived value.
+                  </li>
+                </ul>
+              </article>
+
+              <div className="actions inline-actions">
                 <button
                   className="btn btn-primary"
                   type="button"
-                  onClick={() => {
-                    if (canEdit) saveNow('Saved')
-                    askIdentity(activePerson + 1)
-                  }}
+                  onClick={() => goToValues()}
                 >
-                  Next · {PEOPLE[activePerson + 1].name}
+                  Enter my values
                 </button>
-              ) : (
                 <button
-                  className="btn btn-primary"
+                  className="btn btn-secondary"
                   type="button"
-                  onClick={() => {
-                    if (canEdit) saveNow('Saved')
-                    runDiscovery()
-                  }}
+                  onClick={() => setStep('house')}
                 >
-                  See split
+                  See rooms
                 </button>
-              )}
+              </div>
             </div>
           </section>
         )}
@@ -840,7 +995,7 @@ export default function App() {
               </p>
             </div>
 
-            <div className="actions actions-bar">
+            <div className="actions inline-actions">
               <button
                 className="btn btn-primary"
                 type="button"
@@ -852,6 +1007,50 @@ export default function App() {
           </section>
         )}
       </div>
+
+      {step === 'value' && (
+        <div className="sticky-footer">
+          <button
+            className="btn btn-secondary"
+            type="button"
+            disabled={!canEdit}
+            onClick={resetEqualActive}
+          >
+            Reset
+          </button>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            disabled={!canEdit || !supabaseConfigured}
+            onClick={() => saveNow('Saved')}
+          >
+            Save
+          </button>
+          {activePerson < PEOPLE.length - 1 ? (
+            <button
+              className="btn btn-primary sticky-primary"
+              type="button"
+              onClick={() => {
+                if (canEdit) saveNow('Saved')
+                askIdentity(activePerson + 1)
+              }}
+            >
+              Next · {PEOPLE[activePerson + 1].name}
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary sticky-primary"
+              type="button"
+              onClick={() => {
+                if (canEdit) saveNow('Saved')
+                runDiscovery()
+              }}
+            >
+              See split
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
